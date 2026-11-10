@@ -5,24 +5,21 @@ Uses the FIRST existing page-level websocket (no new tab = no focus steal risk).
 Injects embaler/lib/capture.js + security.js, types real values, captures, wipes,
 restores, asserts on real DOM.
 """
-import asyncio, json, urllib.request, urllib.parse, sys
-
-# sys.path.insert(0, ...)
-import cdp_safe as C
+import asyncio, json, urllib.request, urllib.parse, sys, os
 import websockets
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+CDP_BASE = 'http://127.0.0.1:9222'
 _port = None
-import os as _os
-# Port: --port <p> or CEMETERY_CDP_PORT env; default stays cdp_safe's 9222.
+# Port: --port <p> or CEMETERY_CDP_PORT env; default 9222.
 for _i, _a in enumerate(sys.argv):
     if _a == '--port' and _i + 1 < len(sys.argv):
         _port = sys.argv[_i + 1]
     elif _a.startswith('--port='):
         _port = _a.split('=', 1)[1]
-_port = _port or _os.environ.get('CEMETERY_CDP_PORT')
+_port = _port or os.environ.get('CEMETERY_CDP_PORT')
 if _port:
-    C.CDP_BASE = 'http://127.0.0.1:%s' % _port
+    CDP_BASE = 'http://127.0.0.1:%s' % _port
 CAP = open(f'{ROOT}/extension/embaler/lib/capture.js').read()
 SEC = open(f'{ROOT}/extension/embaler/lib/security.js').read()
 # The libs now ship as UMD: in a browser the exports land on window.__UmdBundle.
@@ -64,7 +61,7 @@ async def main():
     # Fresh page target per run: reusing a stale target's websocket URL hangs the
     # whole suite when the browser was restarted between runs.
     tgt = json.loads(urllib.request.urlopen(urllib.request.Request(
-        C.CDP_BASE + '/json/new?about:blank', method='PUT')).read())
+        CDP_BASE + '/json/new?about:blank', method='PUT')).read())
     async with websockets.connect(tgt['webSocketDebuggerUrl'], max_size=None) as ws:
         n = [0]
         async def cmd(method, **params):

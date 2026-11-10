@@ -1,4 +1,4 @@
-# Chrome Cemetery — Windows install (DELL_SONI)
+# ChromeRAMFix — Windows install (DELL_SONI)
 
 Same engine that runs on the Mac: kernel-pressure-driven tab discarding with a
 zero-flash state store. No showpiece popup, no toolbar clutter — it runs

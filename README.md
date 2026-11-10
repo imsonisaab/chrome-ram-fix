@@ -1,8 +1,8 @@
-# Chrome Cemetery 🪦
+# ChromeRAMFix 🪦
 
 **80–90% less RAM for Google Chrome. Zero flash. Zero lost tabs.**
 
-Chrome Cemetery is an invisible, sub-millisecond tab compression and memory recovery engine for **Google Chrome**, **Brave**, **Microsoft Edge**, **Arc**, and any Chromium browser on **macOS (Apple Silicon / Intel)** and **Windows 10/11**.
+ChromeRAMFix is an invisible, sub-millisecond tab compression and memory recovery engine for **Google Chrome**, **Brave**, **Microsoft Edge**, **Arc**, and any Chromium browser on **macOS (Apple Silicon / Intel)** and **Windows 10/11**.
 
 It keeps your browser feeling 100% stock while eliminating Chrome's infamous multi-gigabyte memory bloat — without closing tabs, losing form drafts, or resetting scroll positions.
 
@@ -18,7 +18,7 @@ Google Chrome creates an isolated operating system process for every open tab (`
 
 ---
 
-## How Chrome Cemetery Fixes It
+## How ChromeRAMFix Fixes It
 
 ```
   ┌───────────────────────────────────────────────────────────┐

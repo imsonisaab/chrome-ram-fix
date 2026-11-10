@@ -70,5 +70,5 @@ function sample() {
 ;(function (g) {
   var ex = { vmStat, swapUsage, classify, sample };
   if (typeof module !== 'undefined' && module.exports) { module.exports = ex; }
-  else { g.__UmdBundle = Object.assign(g.__UmdBundle || {}, ex); }
+  else { g.GovernorPressure = ex; g.__UmdBundle = Object.assign(g.__UmdBundle || {}, ex); }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

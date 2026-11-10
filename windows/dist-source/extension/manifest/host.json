@@ -1,6 +1,6 @@
 {
   "name": "com.chrome_cemetery.bridge",
-  "description": "Chrome Cemetery tab-state bridge to the compressed Rust store",
+  "description": "ChromeRAMFix tab-state bridge to the compressed Rust store",
   "path": "native-host.sh",
   "type": "stdio",
   "allowed_origins": [

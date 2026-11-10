@@ -1,6 +1,6 @@
 {
   "name": "com.brave_cemetery.bridge",
-  "description": "Chrome Cemetery — governor bridge (Windows)",
+  "description": "ChromeRAMFix — governor bridge (Windows)",
   "path": "native-host.cmd",
   "type": "stdio",
   "allowed_origins": [

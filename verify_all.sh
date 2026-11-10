@@ -8,6 +8,10 @@ set -uo pipefail
 BASE="$(cd "$(dirname "$0")" && pwd)"
 cd "$BASE" || exit 1
 NODE="${NODE:-$(command -v node)}"
+for cand in "$HOME/.hermes/tools/node-26.7.0-darwin-arm64/bin/node" /opt/homebrew/bin/node /usr/local/bin/node; do
+  if [ -z "$NODE" ] && [ -x "$cand" ]; then NODE="$cand"; fi
+done
+[ -n "$NODE" ] || { echo "FATAL: node not found"; exit 1; }
 # Python interpreter: prefer one that has `websockets` (the live CDP test needs it).
 PY="${PY:-}"
 if [ -z "$PY" ]; then

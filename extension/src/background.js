@@ -4,7 +4,7 @@
 
 console.log('[governor] worker starting');
 try {
-  importScripts('../governor/lib/policy.js', '../governor/lib/pressureClient.js');
+  importScripts('../governor/lib/policy.js', '../governor/lib/machPressure.js');
   console.log('[governor] imports OK; globalThis.Policy=', typeof globalThis.Policy, 'globalThis.GovernorPressure=', typeof globalThis.GovernorPressure);
 } catch (e) {
   console.error('[governor] importScripts FAILED:', e && e.message);

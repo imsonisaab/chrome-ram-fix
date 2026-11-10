@@ -1,30 +1,49 @@
 {
   "manifest_version": 3,
   "key": "MIIBITANBgkqhkiG9w0BAQEFAAOCAQ4AMIIBCQKCAQAA6/vrBLN8c6UHBAk+VLwWeHifq5p39/SRWSbVt2EWS4f7nf30byWJDwOFAoFFT8dkFiBoyD8XQDcXm0O2XNSicxXJY4W/HAFyeNfRzp74vQ16t/Ml3adQ69lymP6ihSXnbto6lL68MY1cTdQKptzEa3Xc5Xn7kgpbhjJ/wMKCM2rNpVlJLFUeFbBz3L4EAyIoGkuJJJcauMI+jXpC0D2yy2ad+zaa+7EqoF7p8B1eW0BI7aOkIZBVwz9E3ndG9okghe04Slo23PHSkjh2SwM+6fj5l92rDnvgcsOzfMUq5Uq3OQtacfkuPoD/5wHfw1uuzpIW5+n4LCjr3Qaip0JzAgMBAAE=",
-  "name": "Chrome Cemetery — RAM-Aware Tab Discarding",
-  "version": "0.2.0",
-  "description": "Level 2 memory governor: kernel-pressure-driven tab discard with zero-flash state re-apply. 15% storage floor enforced by the watchdog.",
+  "name": "ChromeRAMFix",
+  "version": "0.3.0",
+  "description": "Cuts Chrome RAM by 80-90%: idle background tabs are compressed to a tiny on-disk snapshot, then discarded. Clicking the tab restores scroll, forms and video position with zero flash.",
   "minimum_chrome_version": "121",
-  "permissions": ["tabs", "alarms", "storage", "nativeMessaging"],
-  "host_permissions": ["http://127.0.0.1:8795/pressure"],
+  "permissions": [
+    "tabs",
+    "alarms",
+    "storage",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8795/pressure"
+  ],
   "background": {
     "service_worker": "src/background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["embaler/lib/*.js", "governor/lib/*.js"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "embaler/lib/*.js",
+        "governor/lib/*.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
-  "action": {
-    "default_title": "Chrome Cemetery"
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }
