@@ -21,7 +21,7 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
 
-NODE="${NODE:-$(command -v node)}"
+NODE="${NODE:-$(command -v node 2>/dev/null || echo '/usr/local/bin/node')/node}"
 command -v "$NODE" >/dev/null 2>&1 || NODE=node
 PY="${PY:-python3}"
 

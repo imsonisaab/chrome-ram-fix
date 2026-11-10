@@ -21,7 +21,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="Brave Browser RAM Edition"
 APP_ID="com.bravecemetery.ramedition"
-NODE_HOME="${NODE_HOME:-$(dirname "$(command -v node 2>/dev/null || echo '/usr/local/bin/node')")}"
+NODE_HOME="${NODE_HOME:-$(command -v node 2>/dev/null || echo '/usr/local/bin/node')}"
 
 c_grn='\033[0;32m'; c_yel='\033[0;33m'; c_red='\033[0;31m'; c_off='\033[0m'
 ok()   { printf "${c_grn}[OK]${c_off} %s\n" "$*"; }
@@ -45,7 +45,7 @@ echo
 
 # ---------- 0. preflight ----------
 command -v bash  >/dev/null || die "bash required"
-[ -d "$ROOT/extension" ] || die "run from the chrome-cemetery repo root"
+[ -d "$ROOT/extension" ] || die "run from the brave-cemetery repo root"
 export PATH="$NODE_HOME:$PATH"
 
 # ---------- 1. build the engine ----------
