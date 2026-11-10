@@ -1,0 +1,41 @@
+# ---- build output ----------------------------------------------------------
+dist/
+*.dmg
+*.zip
+
+# ---- brave source nest (refetched by sync_brave.sh) ------------------------
+brave-core/src/
+brave-core/brave-core-only/
+brave-core/out/
+brave-core/*.sync.status
+node_modules/
+
+# ---- rust -------------------------------------------------------------------
+cemetery/target/
+cemetery/data/
+
+# ---- logs & build trash ----------------------------------------------------
+*.log
+logs/
+chain_watch.log
+overnight.log
+overnight.stdout.log
+accept_app.log
+fix_meta_clone.log
+
+# ---- chromium build system scratch -----------------------------------------
+_bad_scm/
+**/_bad_scm/
+out/
+
+# ---- runtime state (never inside the repo) ---------------------------------
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+
+# ---- caches -----------------------------------------------------------------
+.cache/
+*.tsbuildinfo
+.eslintcache

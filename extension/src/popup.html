@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Governor</title>
+<style>
+  body { font: 12px -apple-system, system-ui, sans-serif; width: 280px; margin: 0; padding: 12px; }
+  h1 { font-size: 13px; margin: 0 0 8px; }
+  .row { display: flex; justify-content: space-between; margin: 3px 0; }
+  .lvl { font-weight: 600; }
+  .lvl0 { color: #2e7d32; } .lvl1 { color: #558b2f; } .lvl2 { color: #ef6c00; }
+  .lvl3 { color: #c62828; } .lvl4 { color: #b71c1c; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>Governor</h1>
+<div class="row"><span>Pressure</span><span class="lvl" id="lvl">—</span></div>
+<div class="row"><span>Free</span><span id="free">—</span></div>
+<div class="row"><span>Swap</span><span id="swap">—</span></div>
+<div class="row"><span>Tabs tracked</span><span id="tabs">—</span></div>
+<div class="row"><span>Discarded</span><span id="disc">—</span></div>
+<div class="row"><span>Restored</span><span id="rest">—</span></div>
+<div class="row"><span>Source</span><span id="src"><small>daemon/stale</small></span></div>
+<script src="popup.js"></script>
+</body>
+</html>

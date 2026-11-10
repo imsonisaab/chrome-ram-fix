@@ -1,0 +1,13 @@
+[package]
+name = "cemetery"
+version = "0.1.0"
+edition = "2021"
+description = "Compressed memory-mapped snapshot store for the Level-3 tab governor"
+
+[lib]
+name = "cemetery"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cemeteryd"
+path = "src/main.rs"
