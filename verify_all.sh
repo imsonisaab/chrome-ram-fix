@@ -29,7 +29,7 @@ run(){ # run <label> <cmd...>
   fi
 }
 
-echo "=== brave-cemetery verification ==="
+echo "=== chrome-cemetery verification ==="
 
 # --- static syntax ---
 for f in extension/src/background.js extension/src/content.js extension/src/popup.js \

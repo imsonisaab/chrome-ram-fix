@@ -45,7 +45,7 @@ echo
 
 # ---------- 0. preflight ----------
 command -v bash  >/dev/null || die "bash required"
-[ -d "$ROOT/extension" ] || die "run from the brave-cemetery repo root"
+[ -d "$ROOT/extension" ] || die "run from the chrome-cemetery repo root"
 export PATH="$NODE_HOME:$PATH"
 
 # ---------- 1. build the engine ----------

@@ -3,6 +3,7 @@
 'use strict';
 const fs = require('fs');
 const vm = require('vm');
+const path = require('path');
 const assert = require('assert');
 const ROOT = path.resolve(__dirname, '../..');
 const POPUP = fs.readFileSync(ROOT + '/extension/src/popup.js', 'utf8');

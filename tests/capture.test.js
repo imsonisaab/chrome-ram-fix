@@ -44,13 +44,13 @@ line2</textarea>
   `);
   const d = dom.window.document;
   d.getElementById('email').value = 'r@x.in';
-  d.getElementById('city').value = 'hgh';
+  d.getElementById('city').value = 'nyc';
 
   const state = new Embalmer(dom.window).capture();
   assert.strictEqual(state.fields['#name'], 'Rahul');
   assert.strictEqual(state.fields['#email'], 'r@x.in');
   assert.strictEqual(state.fields['#bio'], 'line1\nline2');
-  assert.strictEqual(state.selects['#city'], 'hgh');
+  assert.strictEqual(state.selects['#city'], 'nyc');
   assert.strictEqual(state.checked['#agree'], true);
   assert.strictEqual(state.radios['plan'], 'gold');
   assert.strictEqual(state.fields['#pw'], undefined, 'password must NEVER be captured');

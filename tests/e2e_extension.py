@@ -9,10 +9,10 @@ Uses a background page-level CDP websocket (no new tab = no focus steal).
 import asyncio, json, urllib.request, sys, time, os, threading, functools, http.server, socketserver
 
 # sys.path.insert(0, ...)
-import cdp_safe as C
 import websockets
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+CDP_BASE = 'http://127.0.0.1:9222'
 EXT = ROOT + '/extension'
 DAEMON = 'http://127.0.0.1:8795/pressure'
 
@@ -32,7 +32,7 @@ except Exception:
 HTML = 'http://127.0.0.1:8791/' + os.path.basename(FIXTURE)
 
 async def main():
-    targets = json.loads(urllib.request.urlopen(C.CDP_BASE + '/json/list').read())
+    targets = json.loads(urllib.request.urlopen(CDP_BASE + '/json/list').read())
     tgt = next(t for t in targets if t['type'] == 'page')
     async with websockets.connect(tgt['webSocketDebuggerUrl'], max_size=None) as ws:
         n = [0]
