@@ -178,6 +178,11 @@ bash verify_all.sh
 
 ---
 
+## Contributors
+
+- **Hermes Agent** (Nous Research) — architecture, implementation, testing, and packaging
+- **RoyalInnsog** — project owner and maintainer
+
 ## License
 
 MIT License. Free to use, modify, and distribute.
