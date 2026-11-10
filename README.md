@@ -91,7 +91,7 @@ Every number below was directly measured and verified via automated test harness
 
 #### 1-Command Engine Install:
 ```bash
-git clone https://github.com/RoyalInnsog/chrome-cemetery.git
+git clone https://github.com/RoyalInnsog/chrome-ram-fix.git
 cd chrome-cemetery
 bash install.sh
 ```
