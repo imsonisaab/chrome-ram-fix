@@ -1,7 +1,7 @@
 {
-  "name": "com.brave_cemetery.bridge",
-  "description": "Brave Cemetery tab-state bridge to the compressed Rust store",
-  "path": "./extension/native-host.sh",
+  "name": "com.chrome_cemetery.bridge",
+  "description": "Chrome Cemetery tab-state bridge to the compressed Rust store",
+  "path": "native-host.sh",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://inmeejlkgbkicdbmolcofpafekejaick/"

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "key": "MIIBITANBgkqhkiG9w0BAQEFAAOCAQ4AMIIBCQKCAQAA6/vrBLN8c6UHBAk+VLwWeHifq5p39/SRWSbVt2EWS4f7nf30byWJDwOFAoFFT8dkFiBoyD8XQDcXm0O2XNSicxXJY4W/HAFyeNfRzp74vQ16t/Ml3adQ69lymP6ihSXnbto6lL68MY1cTdQKptzEa3Xc5Xn7kgpbhjJ/wMKCM2rNpVlJLFUeFbBz3L4EAyIoGkuJJJcauMI+jXpC0D2yy2ad+zaa+7EqoF7p8B1eW0BI7aOkIZBVwz9E3ndG9okghe04Slo23PHSkjh2SwM+6fj5l92rDnvgcsOzfMUq5Uq3OQtacfkuPoD/5wHfw1uuzpIW5+n4LCjr3Qaip0JzAgMBAAE=",
-  "name": "Governor — RAM-Aware Tab Discarding",
+  "name": "Chrome Cemetery — RAM-Aware Tab Discarding",
   "version": "0.2.0",
   "description": "Level 2 memory governor: kernel-pressure-driven tab discard with zero-flash state re-apply. 15% storage floor enforced by the watchdog.",
   "minimum_chrome_version": "121",
@@ -25,6 +25,6 @@
     }
   ],
   "action": {
-    "default_title": "Brave"
+    "default_title": "Chrome Cemetery"
   }
 }

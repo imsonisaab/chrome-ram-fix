@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-set "NAME=Brave RAM Edition"
+set "NAME=Chrome Cemetery"
 set "MARK=BASE64PAYLOADSTART"
 set "OUT=%TEMP%\BraveRAMEdition"
 
@@ -31,8 +31,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 ( echo [FAIL] unpack failed & pause & exit /b 1 )
 
 cd /d "%OUT%"
-if not exist "Brave-RAM-Edition-Windows-Installer.bat" (
+if not exist "Chrome-Cemetery-Windows-Installer.bat" (
   echo [FAIL] installer missing from payload & pause & exit /b 1
 )
-call "Brave-RAM-Edition-Windows-Installer.bat"
+call "Chrome-Cemetery-Windows-Installer.bat"
 exit /b %ERRORLEVEL%

@@ -1,4 +1,4 @@
-# Brave RAM Edition — Windows install (DELL_SONI)
+# Chrome Cemetery — Windows install (DELL_SONI)
 
 Same engine that runs on the Mac: kernel-pressure-driven tab discarding with a
 zero-flash state store. No showpiece popup, no toolbar clutter — it runs
@@ -6,8 +6,8 @@ silently in the background of your normal Brave.
 
 ## Install
 
-1. Copy the whole `Brave-RAM-Edition-Windows-Installer` folder to the laptop.
-2. Double-click **`Brave-RAM-Edition-Windows-Installer.cmd`**.
+1. Copy the whole `Chrome-Cemetery-Windows-Installer` folder to the laptop.
+2. Double-click **`Chrome-Cemetery-Windows-Installer.cmd`**.
    It is a single self-contained file: it unpacks its own payload and runs the
    installer. No tooling, no admin rights.
 3. Restart Brave. Nothing appears in the UI; that is the point.
@@ -15,7 +15,7 @@ silently in the background of your normal Brave.
 **Want a `.exe` icon instead of a `.cmd`?** Copy the folder to the laptop and
 run `build-windows-exe.bat` once — it wraps the same file with `iexpress`
 (already installed on Windows 11) into
-`Brave-RAM-Edition-Windows-Installer.exe`. This has to happen on Windows:
+`Chrome-Cemetery-Windows-Installer.exe`. This has to happen on Windows:
 `iexpress.exe` ships only with Windows, and the Mac build machine has no
 cross-compiler, so producing a runnable PE there is not possible. We deliberately
 ship a working `.cmd` rather than a fake "exe" that Windows would refuse to run.

@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-set "NAME=Brave RAM Edition"
+set "NAME=Chrome Cemetery"
 set "INSTROOT=%LOCALAPPDATA%\BraveCemetery"
 set "STORE=%LOCALAPPDATA%\BraveCemetery\store"
 set "TASKNAME=BraveCemeteryGovernor"
@@ -30,7 +30,7 @@ set "HOSTDIR=%LOCALAPPDATA%\BraveSoftware\Brave-Browser\NativeMessagingHosts"
 if not exist "!HOSTDIR!" mkdir "!HOSTDIR!"
 set "HOSTJSON=!HOSTDIR!\%BRIDGE%.json"
 powershell -NoProfile -Command ^
-  "$p = @{ name='%BRIDGE%'; description='Brave RAM Edition - governor bridge (Windows)'; path='%INSTROOT:\=\\%\\windows-host\\native-host.cmd'; type='stdio'; allowed_origins=@('chrome-extension://%EXTID%/') } | ConvertTo-Json; Set-Content -LiteralPath '!HOSTJSON!' -Value $p -Encoding ASCII"
+  "$p = @{ name='%BRIDGE%'; description='Chrome Cemetery - governor bridge (Windows)'; path='%INSTROOT:\=\\%\\windows-host\\native-host.cmd'; type='stdio'; allowed_origins=@('chrome-extension://%EXTID%/') } | ConvertTo-Json; Set-Content -LiteralPath '!HOSTJSON!' -Value $p -Encoding ASCII"
 echo [3/5] native host registered at !HOSTJSON!
 
 set "POLROOT=HKCU\SOFTWARE\Policies\BraveSoftware\Brave-Browser"
