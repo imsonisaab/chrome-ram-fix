@@ -4,8 +4,19 @@
 
 console.log('[governor] worker starting');
 try {
-  importScripts('../governor/lib/policy.js', '../governor/lib/machPressure.js');
-  console.log('[governor] imports OK; globalThis.Policy=', typeof globalThis.Policy, 'globalThis.GovernorPressure=', typeof globalThis.GovernorPressure);
+  // MV3 service worker: importScripts paths are relative to the WORKER script
+  // (src/background.js), so ../ reaches the extension root.
+  importScripts(
+    '../governor/lib/policy.js',
+    '../governor/lib/machPressure.js',
+    '../embaler/lib/security.js',
+    '../embaler/lib/capture.js',
+    '../embaler/lib/hydrate.js',
+    '../embaler/lib/restoreTiming.js'
+  );
+  console.log('[governor] imports OK; Policy=', typeof globalThis.Policy,
+              'GovernorPressure=', typeof globalThis.GovernorPressure,
+              'UmdBundle keys=', Object.keys(globalThis.__UmdBundle || {}).join(','));
 } catch (e) {
   console.error('[governor] importScripts FAILED:', e && e.message);
 }
