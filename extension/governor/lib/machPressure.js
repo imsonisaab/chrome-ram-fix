@@ -6,10 +6,26 @@
 // Level model mirrors memory_pressure(8) reporting:
 //   0 normal, 1 warn, 2 critical, 3 severe, 4 terminal
 'use strict';
-const { execFileSync } = require('child_process');
+// Node-only dependency. In a browser/worker there is no child_process and no
+// require at all, so resolve it lazily and degrade to 'unknown pressure' instead
+// of throwing at load time — a throw here kills importScripts() for the whole
+// worker, which silently disabled every other lib.
+let execFileSync = null;
+function nodeExec(...args) {
+  if (execFileSync === null) {
+    try {
+      // eslint-disable-next-line no-new-func
+      execFileSync = (typeof require === 'function')
+        ? require('child_process').execFileSync
+        : false;
+    } catch (_) { execFileSync = false; }
+  }
+  if (!execFileSync) throw new Error('child_process unavailable (not Node)');
+  return execFileSync(...args);
+}
 
 function vmStat() {
-  const out = execFileSync('vm_stat', [], { encoding: 'utf8', timeout: 4000 });
+  const out = nodeExec('vm_stat', [], { encoding: 'utf8', timeout: 4000 });
   const pageSize = /page size of (\d+) bytes/.exec(out);
 // macOS 13+ vm_stat prints "Pages free:" with whitespace padding (not \t).
 // Accept both "Pages free:   123." and "Pages free:\t123".
@@ -29,7 +45,7 @@ const PAGE_RE = (label) => new RegExp(`Pages ${label}:\\s+(\\d+)`);
 
 function swapUsage() {
   try {
-    const out = execFileSync('sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8', timeout: 4000 });
+    const out = nodeExec('sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8', timeout: 4000 });
     // "total = 2048.00M  used = 1536.00M  free = 512.00M (encrypted)"
     const used = /used = ([\d.]+)([MG])/.exec(out);
     if (!used) return { usedMB: 0 };

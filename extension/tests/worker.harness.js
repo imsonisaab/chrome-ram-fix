@@ -164,8 +164,30 @@ function loadWorker(tabs, opts, forcedPressure) {
     Promise, Symbol, WeakMap, isNaN, parseInt, parseFloat, encodeURIComponent, decodeURIComponent,
   };
   vm.createContext(sandbox);
-  const pol = fs.readFileSync(path.join(ROOT, 'governor/lib/policy.js'), 'utf8');
-  vm.runInContext(pol + '\nthis.Policy = { decide, prewarm };', sandbox);
+  // Preload ALL SIX worker libs exactly as background.js's importScripts() does,
+  // so the harness proves the real load path instead of silently substituting
+  // only governor. Paths are extension-root-relative, matching the worker.
+  // Must mirror background.js's importScripts() list exactly. hydrate.js is
+  // deliberately absent: it is a page-context lib, not worker-safe.
+  const libs = [
+    'extension/governor/lib/policy.js',
+    'extension/governor/lib/machPressure.js',
+    'extension/embaler/lib/security.js',
+    'extension/embaler/lib/capture.js',
+    'extension/embaler/lib/restoreTiming.js',
+  ];
+  for (const rel of libs) {
+    const abs = path.join(ROOT, rel);
+    assert.ok(fs.existsSync(abs), `missing worker lib: ${rel}`);
+    vm.runInContext(fs.readFileSync(abs, 'utf8'), sandbox);
+  }
+  // The worker reads globals the UMD footers set. Assert they landed, or the
+  // harness would pass while the real extension fails to import.
+  const landed = vm.runInContext(
+    'Object.keys(this.__UmdBundle || {}).concat(this.Policy ? "Policy" : []).join(",")', sandbox);
+  assert.ok(/decide/.test(landed), `Policy.decide missing after lib load: ${landed}`);
+  assert.ok(/Embalmer/.test(landed), `Embalmer missing after lib load: ${landed}`);
+  // Force the pressure sample deterministically.
   vm.runInContext(
     'this.GovernorPressure = { sample: async () => (' + JSON.stringify(forcedPressure) + ') };',
     sandbox);

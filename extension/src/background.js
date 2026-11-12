@@ -6,12 +6,14 @@ console.log('[governor] worker starting');
 try {
   // MV3 service worker: importScripts paths are relative to the WORKER script
   // (src/background.js), so ../ reaches the extension root.
+  // Only worker-safe libs here. hydrate.js is a PAGE-context lib that
+  // content.js injects into the tab at document_start — it touches
+  // history/window and must never enter the service worker.
   importScripts(
     '../governor/lib/policy.js',
     '../governor/lib/machPressure.js',
     '../embaler/lib/security.js',
     '../embaler/lib/capture.js',
-    '../embaler/lib/hydrate.js',
     '../embaler/lib/restoreTiming.js'
   );
   console.log('[governor] imports OK; Policy=', typeof globalThis.Policy,

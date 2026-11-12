@@ -20,7 +20,11 @@ const VERSION = 3;
 // Node). Read it lazily so declaration order does not matter and no name is
 // rebound in the shared scope.
 const canCapture = (el) => {
-  const fn = (typeof window !== 'undefined' && window.__UmdBundle && window.__UmdBundle.shouldCapture) ||
+  // Global first (browser <script> and the MV3 worker both populate
+  // globalThis.__UmdBundle), require only as a Node fallback — never reference
+  // `require` unguarded, it does not exist in a VM sandbox or a service worker.
+  const g = (typeof globalThis !== 'undefined') ? globalThis : this;
+  const fn = (g.__UmdBundle && g.__UmdBundle.shouldCapture) ||
     (typeof require === 'function' ? require('./security.js').shouldCapture : null);
   return fn ? fn(el) : true;
 };
