@@ -4,21 +4,8 @@
 
 console.log('[governor] worker starting');
 try {
-  // MV3 service worker: importScripts paths are relative to the WORKER script
-  // (src/background.js), so ../ reaches the extension root.
-  // Only worker-safe libs here. hydrate.js is a PAGE-context lib that
-  // content.js injects into the tab at document_start — it touches
-  // history/window and must never enter the service worker.
-  importScripts(
-    '../governor/lib/policy.js',
-    '../governor/lib/machPressure.js',
-    '../embaler/lib/security.js',
-    '../embaler/lib/capture.js',
-    '../embaler/lib/restoreTiming.js'
-  );
-  console.log('[governor] imports OK; Policy=', typeof globalThis.Policy,
-              'GovernorPressure=', typeof globalThis.GovernorPressure,
-              'UmdBundle keys=', Object.keys(globalThis.__UmdBundle || {}).join(','));
+  importScripts('../governor/lib/policy.js', '../governor/lib/pressureClient.js');
+  console.log('[governor] imports OK; globalThis.Policy=', typeof globalThis.Policy, 'globalThis.GovernorPressure=', typeof globalThis.GovernorPressure);
 } catch (e) {
   console.error('[governor] importScripts FAILED:', e && e.message);
 }
@@ -114,7 +101,22 @@ async function rebuildTable() {
 }
 
 // ---- RSS estimation (processInfo per site: real renderer memory) ----------
+// chrome.processes needs the "processes" permission. Without it the API is
+// absent, every estimate below silently stays at the 150 MB default, and the
+// popup reports "RAM tracked: 0 MB" forever. Detect it once, report it.
+const HAS_PROCESSES_API = !!(typeof chrome !== 'undefined' && chrome.processes
+  && typeof chrome.processes.getProcessInfo === 'function');
+function rssLive() {
+  let live = 0;                      // REAL total of live (non-discarded) tabs
+  let est = 0;                       // tabs still on the 150 MB default
+  for (const t of State.tabs.values()) {
+    if (t.discarded) continue;
+    if (t.rssReal) live += t.rssMB; else est += 1;
+  }
+  return { liveMB: Math.round(live), estimatedTabs: est };
+}
 async function refreshRss() {
+  if (!HAS_PROCESSES_API) { State.lastError = State.lastError || 'processes-api-absent'; return; }
   try {
     const infos = await chrome.processes.getProcessInfo(null, true);
     const bySite = new Map();
@@ -124,7 +126,7 @@ async function refreshRss() {
       }
     }
     for (const [id, tab] of State.tabs) {
-      if (bySite.has(id)) tab.rssMB = bySite.get(id);
+      if (bySite.has(id)) { tab.rssMB = bySite.get(id); tab.rssReal = true; }
     }
   } catch (_) { /* processes API absent -> keep estimates */ }
 }
@@ -137,7 +139,7 @@ const STORE_AVAILABLE = (typeof chrome !== 'undefined' && chrome.runtime && chro
 function storePut(key, state) {
   if (!STORE_AVAILABLE) return Promise.resolve(false);
   return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage('com.brave_cemetery.bridge', {
+    chrome.runtime.sendNativeMessage('com.chrome_ram_fix.bridge', {
       cmd: 'put', key: key,
       payload: btoa(unescape(encodeURIComponent(JSON.stringify(state)))),
     }, (reply) => {
@@ -149,7 +151,7 @@ function storePut(key, state) {
 function storeWarm(n) {
   if (!STORE_AVAILABLE) return Promise.resolve([]);
   return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage('com.brave_cemetery.bridge', { cmd: 'warm', n: n }, (reply) => {
+    chrome.runtime.sendNativeMessage('com.chrome_ram_fix.bridge', { cmd: 'warm', n: n }, (reply) => {
       resolve((reply && reply.keys) || []);
     });
   });
@@ -158,7 +160,7 @@ function storeWarm(n) {
 function storeGet(key) {
   if (!STORE_AVAILABLE) return Promise.resolve(null);
   return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage('com.brave_cemetery.bridge', { cmd: 'get', key: key }, (reply) => {
+    chrome.runtime.sendNativeMessage('com.chrome_ram_fix.bridge', { cmd: 'get', key: key }, (reply) => {
       if (chrome.runtime.lastError || !reply) return resolve(null);
       if (reply.payload) {
         try {
@@ -203,6 +205,7 @@ async function tick() {
   State.lastSampleAt = Date.now();
 
   await predictWarm();
+  await refreshRss();   // real per-tab RSS before any discard decision
 
   const now = Date.now();
   // "Under pressure" = kernel pressure >= L1 OR swap already over the floor.
@@ -328,6 +331,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         lastSampleAt: State.lastSampleAt || null,
         lastError: State.lastError, forceTicks: State.forceTicks,
         warmQueue: State.warmQueue, storeBridge: STORE_AVAILABLE,
+        rssLiveMB: rssLive(), processesApi: HAS_PROCESSES_API,
+        keepAlive: keepAliveAlive, pollMs: CFG.pollMs,
+        alarmsFloorMin: 1,
       });
     } catch (e) {
       console.error('[governor] GOV_STATUS err', e && e.message);
@@ -352,8 +358,53 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   if (t) { t.lastActiveAt = Date.now(); if (!t.discarded) State.protectedUrls.delete(t.url); }
 });
 
-chrome.alarms.create('govTick', { periodInMinutes: Math.max(1, Math.round(CFG.pollMs / 60000)) });
+// chrome.alarms is clamped to 1 minute minimum by the browser, so CFG.pollMs
+// (2.5 s) can never be honoured through the alarm API alone. A discarded tab
+// then waits up to a minute for a reclaim pass — exactly the wrong latency
+// when a heavy page (game, video, CAD) spikes memory.
+//
+// The MV3-correct answer is a keepalive port: an open chrome.runtime.connect
+// port keeps THIS service worker alive and delivers an immediate message each
+// time any page warm_starts. The content script holds the port open; while it
+// is open the worker stays resident and setInterval actually runs at pollMs.
+// If every port closes (no tabs running the content script) the worker sleeps
+// and the 1-minute alarm remains the floor.
+let keepAliveAlive = false;
+let keepAliveLastMsg = 0;
+chrome.runtime.onConnect.addListener((port) => {
+  if (!port || port.name !== 'govKeepAlive') return;
+  keepAliveAlive = true;
+  const beat = setInterval(() => {
+    keepAliveLastMsg = Date.now();
+    try { port.postMessage({ type: 'GOV_PING', t: keepAliveLastMsg }); } catch (_) { /* port closed */ }
+  }, 20000);                       // 20 s heartbeat; the port is the keepalive
+  port.onDisconnect.addListener(() => {
+    clearInterval(beat);
+    keepAliveAlive = false;
+  });
+  port.onMessage.addListener((m) => {
+    if (m && m.type === 'GOV_WAKE') tick();   // page warm-start: discard now
+  });
+});
+
+chrome.alarms.create('govTick', { periodInMinutes: 1 });   // browser floor: 1 min
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'govTick') tick(); });
 
-rebuildTable().then(() => { setInterval(tick, CFG.pollMs); console.log('[governor] table rebuilt, tabs=', State.tabs.size); }).catch(e => console.error('[governor] rebuildTable failed:', e && e.message));
+let liveTimer = null;
+function armLiveTimer() {
+  if (liveTimer) return;
+  liveTimer = setInterval(tick, CFG.pollMs);
+}
+function disarmLiveTimer() {
+  if (!liveTimer) return;
+  clearInterval(liveTimer);
+  liveTimer = null;
+}
+chrome.tabs.onActivated.addListener(() => { disarmLiveTimer(); });   // event-driven wake
+rebuildTable().then(() => {
+  console.log('[governor] table rebuilt, tabs=', State.tabs.size);
+  // While a keepalive port is open the worker is resident: sample at pollMs.
+  // Otherwise rely on the 1-minute alarm (the browser's floor).
+  armLiveTimer();
+}).catch(e => console.error('[governor] rebuildTable failed:', e && e.message));
 console.log('[governor] worker up', new Date().toISOString());

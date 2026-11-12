@@ -6,7 +6,7 @@ const fs = require('fs');
 const vm = require('vm');
 const assert = require('assert');
 const path = require('path');
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = '/Users/apple/Documents/chrome-cemetery';
 
 const SEC = fs.readFileSync(path.join(ROOT, 'extension/embaler/lib/security.js'), 'utf8');
 const CAP = fs.readFileSync(path.join(ROOT, 'extension/embaler/lib/capture.js'), 'utf8');

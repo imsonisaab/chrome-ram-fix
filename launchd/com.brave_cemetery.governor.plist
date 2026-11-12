@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.brave_cemetery.governor</string>
+	<string>com.chrome_ram_fix.governor</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>__GOVERNOR_DAEMON__</string>
@@ -12,11 +12,11 @@
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>CEMETERY_DIR</key>
-		<string>$HOME/Library/Application Support/ChromeCemetery/store</string>
+		<string>/Users/apple/Library/Application Support/ChromeRAMFix/store</string>
 		<key>GOVERNOR_PORT</key>
 		<string>8795</string>
 		<key>PATH</key>
-		<string>/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin</string>
+		<string>/Users/apple/.hermes/tools/node-26.7.0-darwin-arm64/bin:/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin</string>
 	</dict>
 	<key>KeepAlive</key>
 	<true/>
@@ -25,8 +25,8 @@
 	<key>LowPriorityIO</key>
 	<true/>
 	<key>StandardOutPath</key>
-		<string>$HOME/Library/Logs/ChromeCemetery/governor.out.log</string>
+		<string>/Users/apple/Library/Logs/ChromeRAMFix/governor.out.log</string>
 	<key>StandardErrorPath</key>
-		<string>$HOME/Library/Logs/ChromeCemetery/governor.err.log</string>
+		<string>/Users/apple/Library/Logs/ChromeRAMFix/governor.err.log</string>
 </dict>
 </plist>

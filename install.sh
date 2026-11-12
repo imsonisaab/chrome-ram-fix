@@ -45,7 +45,7 @@ echo
 
 # ---------- 0. preflight ----------
 command -v bash  >/dev/null || die "bash required"
-[ -d "$ROOT/extension" ] || die "run from the brave-cemetery repo root"
+[ -d "$ROOT/extension" ] || die "run from the chrome-cemetery repo root"
 export PATH="$NODE_HOME:$PATH"
 
 # ---------- 1. build the engine ----------
@@ -93,7 +93,7 @@ ok "app: $DEST"
 # The bundle ships native-host/registered.json with the path of wherever it was
 # packaged. Rewrite it for THIS install location, then drive the installed
 # launcher once so the user-level host points at the installed app (not dist/).
-python3 - "$DEST/Contents/Resources/BraveCemetery/native-host/registered.json" <<'PY'
+python3 - "$DEST/Contents/Resources/ChromeRAMFix/native-host/registered.json" <<'PY'
 import json, sys
 p = sys.argv[1]
 m = json.load(open(p))
@@ -102,8 +102,8 @@ json.dump(m, open(p, "w"), indent=2)
 PY
 "$DEST/Contents/MacOS/Brave Browser" --version >/dev/null 2>&1 || true
 NM_DIR="$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
-if [ -f "$NM_DIR/com.brave_cemetery.bridge.json" ]; then
-  HOST_PATH="$(python3 -c "import json;print(json.load(open('$NM_DIR/com.brave_cemetery.bridge.json'))['path'])" 2>/dev/null)"
+if [ -f "$NM_DIR/com.chrome_ram_fix.bridge.json" ]; then
+  HOST_PATH="$(python3 -c "import json;print(json.load(open('$NM_DIR/com.chrome_ram_fix.bridge.json'))['path'])" 2>/dev/null)"
   case "$HOST_PATH" in
     "$DEST"/*) ok "native messaging host -> $HOST_PATH" ;;
     *) warn "host points at $HOST_PATH (expected $DEST) — re-running launcher" ;;
@@ -115,8 +115,8 @@ fi
 # ---------- 3. launchd agents ----------
 echo "[3/5] launchd agents"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
-STATE_DIR="$HOME/Library/Application Support/BraveCemetery/store"
-LOG_DIR="$HOME/Library/Logs/BraveCemetery"
+STATE_DIR="$HOME/Library/Application Support/ChromeRAMFix/store"
+LOG_DIR="$HOME/Library/Logs/ChromeRAMFix"
 if [ -d "$ROOT/launchd" ]; then
   mkdir -p "$STATE_DIR" "$LOG_DIR"
   for pl in "$ROOT"/launchd/*.plist; do
@@ -147,8 +147,8 @@ fi
 
 # ---------- 4. bookmarks / notes ----------
 echo "[4/5] finishing touches"
-ok "store dir: $HOME/Library/Application Support/BraveCemetery/store"
-ok "logs: $HOME/Library/Logs/BraveCemetery"
+ok "store dir: $HOME/Library/Application Support/ChromeRAMFix/store"
+ok "logs: $HOME/Library/Logs/ChromeRAMFix"
 
 # ---------- 5. verify ----------
 echo "[5/5] verifying"

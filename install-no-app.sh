@@ -26,7 +26,7 @@ command -v "$NODE" >/dev/null 2>&1 || NODE=node
 PY="${PY:-python3}"
 
 # ---------- 0. engine root (NOT an app bundle) ------------------------------
-ENGINE_ROOT="${ENGINE_ROOT:-$HOME/Library/Application Support/BraveCemetery/engine}"
+ENGINE_ROOT="${ENGINE_ROOT:-$HOME/Library/Application Support/ChromeRAMFix/engine}"
 mkdir -p "$ENGINE_ROOT"
 
 echo "[1/5] staging engine into $ENGINE_ROOT"
@@ -41,27 +41,27 @@ echo "  engine staged (extension + governor + daemon + cemeteryd)"
 
 # ---------- 1. resident governor (hidden, no app, no UI) --------------------
 echo "[2/5] launchd agent (background, invisible)"
-AGENT_SRC="$PWD/launchd/com.brave_cemetery.governor.plist"
+AGENT_SRC="$PWD/launchd/com.chrome_ram_fix.governor.plist"
 mkdir -p "$HOME/Library/LaunchAgents"
 # point the plist at the engine root, not the repo
 NODE="$HOME/.hermes/tools/node-26.7.0-darwin-arm64/bin/node"
 [ -x "$NODE" ] || NODE="$(command -v node)"
 sed -e "s|__GOVERNOR_DAEMON__|$NODE|" -e "s|__DAEMON_JS__|$ENGINE_ROOT/governor/daemon.js|" "$AGENT_SRC" \
-  > "$HOME/Library/LaunchAgents/com.brave_cemetery.governor.plist"
-plutil -lint "$HOME/Library/LaunchAgents/com.brave_cemetery.governor.plist"
-launchctl bootout "gui/$UID/com.brave_cemetery.governor" 2>/dev/null || true
-launchctl bootstrap "gui/$UID" "$HOME/Library/LaunchAgents/com.brave_cemetery.governor.plist"
+  > "$HOME/Library/LaunchAgents/com.chrome_ram_fix.governor.plist"
+plutil -lint "$HOME/Library/LaunchAgents/com.chrome_ram_fix.governor.plist"
+launchctl bootout "gui/$UID/com.chrome_ram_fix.governor" 2>/dev/null || true
+launchctl bootstrap "gui/$UID" "$HOME/Library/LaunchAgents/com.chrome_ram_fix.governor.plist"
 
 # register the repo copy too, so `bash verify_all.sh` can find it
-cp "$AGENT_SRC" "$PWD/launchd/com.brave_cemetery.governor.plist" 2>/dev/null || true
+cp "$AGENT_SRC" "$PWD/launchd/com.chrome_ram_fix.governor.plist" 2>/dev/null || true
 
 # ---------- 2. native messaging host for the REAL profile -------------------
 echo "[3/5] native messaging host registration"
 HOST_DIR="$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
 mkdir -p "$HOST_DIR"
-cat > "$HOST_DIR/com.brave_cemetery.bridge.json" <<JSON
+cat > "$HOST_DIR/com.chrome_ram_fix.bridge.json" <<JSON
 {
-  "name": "com.brave_cemetery.bridge",
+  "name": "com.chrome_ram_fix.bridge",
   "description": "Brave RAM Edition — tab-state bridge (engine, no app)",
   "path": "$ENGINE_ROOT/native-host/bridge.sh",
   "type": "stdio",
@@ -74,7 +74,7 @@ cat > "$ENGINE_ROOT/native-host/bridge.sh" <<'BRIDGE'
 # Brave RAM Edition native messaging bridge — engine install (no app bundle)
 HERE="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
-export CEMETERY_DIR="${CEMETERY_DIR:-$HOME/Library/Application Support/BraveCemetery/store}"
+export CEMETERY_DIR="${CEMETERY_DIR:-$HOME/Library/Application Support/ChromeRAMFix/store}"
 mkdir -p "$CEMETERY_DIR" 2>/dev/null
 export CEMETERY_BIN="$ROOT/bin/cemeteryd"
 for n in "$HOME/.hermes/tools/node-26.7.0-darwin-arm64/bin" "/usr/local/bin" "/opt/homebrew/bin" "/usr/bin"; do
@@ -83,7 +83,7 @@ done
 exec "$(command -v node)" "$ROOT/extension/native-host.js"
 BRIDGE
 chmod +x "$ENGINE_ROOT/native-host/bridge.sh"
-echo "  host -> $HOST_DIR/com.brave_cemetery.bridge.json"
+echo "  host -> $HOST_DIR/com.chrome_ram_fix.bridge.json"
 
 # ---------- 3. make the extension loadable from the REAL profile ------------
 # macOS TCC blocks an agent from writing Brave's "External Extensions" folder
@@ -104,5 +104,5 @@ for i in 1 2 3 4 5; do
   fi
   sleep 1
 done
-echo "[WARN] governor not answering on :8795 — check ~/Library/Logs/BraveCemetery"
+echo "[WARN] governor not answering on :8795 — check ~/Library/Logs/ChromeRAMFix"
 exit 1

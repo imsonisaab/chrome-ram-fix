@@ -1,0 +1,22 @@
+# PROTECT-LIST — NEVER DELETE (user directive 2026-11-08)
+# Storage rule: 15% of 460GiB (~69GiB) must remain free; PC must stay responsive.
+# Watchdog purges ONLY paths under /Users/apple/Documents/brave-cemetery/build/
+# and /Users/apple/.hermes/cache/scratch/brave_ram/out/ — nothing else, ever.
+
+PROTECTED_PATHS:
+  - /Users/apple/.hermes/installs/                      # user's 22GB install (2588f3ce640801c3)
+  - /Users/apple/.hermes/cache/browser-use/workspace/   # all session dirs incl. local-99c61bd5...
+  - /Users/apple/.colima/                               # 20GB colima disk
+  - /Users/apple/Documents/                             # all user docs, movies, session files
+  - /Users/apple/.hermes/cache/scratch/frames/          # video frames
+  - /Users/apple/.hermes/hermes-agent/
+
+NEVER_DELETE_GLOBS:
+  - "*session*"
+  - "*99c61bd5*"
+  - "*installs*"
+
+FREE_FLOOR_GB: 69          # 15% of 460GiB (user-updated from 20%)
+PURGE_SCOPE:                # the ONLY paths the watchdog may ever delete
+  - /Users/apple/Documents/brave-cemetery/build/**
+  - /Users/apple/.hermes/cache/scratch/brave_ram/out/**

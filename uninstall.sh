@@ -5,7 +5,7 @@
 #   - the RAM Edition app bundles (/Applications + ~/Applications)
 #   - the native messaging host registration
 #   - the launchd agents (governor daemon, watchdog, chainwatch, scheduler)
-#   - the runtime store + logs under ~/Library/.../BraveCemetery
+#   - the runtime store + logs under ~/Library/.../ChromeRAMFix
 #
 # NEVER TOUCHES:
 #   - your Brave profile, bookmarks, passwords, cookies, history
@@ -19,8 +19,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATE="$HOME/Library/Application Support/BraveCemetery"
-LOGS="$HOME/Library/Logs/BraveCemetery"
+STATE="$HOME/Library/Application Support/ChromeRAMFix"
+LOGS="$HOME/Library/Logs/ChromeRAMFix"
 STORE="$STATE/store"
 
 PURGE=0
@@ -55,7 +55,7 @@ for d in "$HOME/Library/LaunchAgents" "$ROOT/launchd"; do
     [ -f "$pl" ] || continue
     L="$(/usr/bin/plutil -extract Label raw "$pl" 2>/dev/null || basename "$pl" .plist)"
     case "$L" in
-      *brave-cemetery*|*brave_cemetery*|*level3*)
+      *chrome-cemetery*|*chrome_ram_fix*|*level3*)
         launchctl bootout "gui/$UID/$L" >/dev/null 2>&1 || launchctl unload "$pl" >/dev/null 2>&1 || true
         rm -f "$d/$L.plist"
         gone "agent: $L"
@@ -72,9 +72,9 @@ ok "agents cleared"
 echo "[2/5] native messaging host"
 for d in "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts" \
          "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"; do
-  [ -f "$d/com.brave_cemetery.bridge.json" ] || continue
-  rm -f "$d/com.brave_cemetery.bridge.json"
-  gone "host: $d/com.brave_cemetery.bridge.json"
+  [ -f "$d/com.chrome_ram_fix.bridge.json" ] || continue
+  rm -f "$d/com.chrome_ram_fix.bridge.json"
+  gone "host: $d/com.chrome_ram_fix.bridge.json"
 done
 ok "host unregistered"
 

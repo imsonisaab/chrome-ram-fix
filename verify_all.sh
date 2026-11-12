@@ -109,7 +109,7 @@ if [ "$A" -ge 1 ]; then echo "GREEN ($A agents)"; else echo "YELLOW (install.sh 
 
 # --- dist app (packaging pipeline) ---
 if [ -d "dist" ]; then
-  printf '%-42s' "dist: RAM Edition app"
+  printf '%-42s' "dist: packaged app"
   if [ -x "dist/Brave Browser.app/Contents/MacOS/Brave Browser" ] \
      && [ -x "dist/Brave Browser.app/Contents/Resources/BraveCemetery/bin/cemeteryd" ] \
      && [ -d "dist/Brave Browser.app/Contents/Resources/BraveCemetery/extension" ]; then
@@ -118,10 +118,10 @@ if [ -d "dist" ]; then
     echo "RED (incomplete bundle)"; fails=$((fails+1))
   fi
   printf '%-42s' "dist: dmg"
-  if ls dist/*.dmg >/dev/null 2>&1; then echo "GREEN ($(ls -lh dist/*.dmg | awk '{print $5, $9}' | tr '\n' ' '))"; else echo "YELLOW (run scripts/package_native_brave_app.sh)"; fi
+  if ls dist/*.dmg >/dev/null 2>&1; then echo "GREEN ($(ls -lh dist/*.dmg | awk '{print $5, $9}' | tr '\n' ' '))"; else echo "YELLOW (run scripts/package_app.sh)"; fi
 else
-  printf '%-42s' "dist: RAM Edition app"
-  echo "YELLOW (run scripts/package_native_brave_app.sh)"
+  printf '%-42s' "dist: packaged app"
+  echo "YELLOW (run scripts/package_app.sh)"
 fi
 
 echo

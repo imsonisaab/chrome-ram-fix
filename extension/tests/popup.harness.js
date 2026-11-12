@@ -3,15 +3,14 @@
 'use strict';
 const fs = require('fs');
 const vm = require('vm');
-const path = require('path');
 const assert = require('assert');
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = '/Users/apple/Documents/chrome-cemetery';
 const POPUP = fs.readFileSync(ROOT + '/extension/src/popup.js', 'utf8');
 
 // Minimal DOM: exactly the ids popup.html declares.
 function makeDom() {
   const els = {};
-  for (const id of ['lvl', 'free', 'swap', 'tabs', 'disc', 'rest', 'src']) {
+  for (const id of ['lvl', 'free', 'swap', 'tabs', 'rss', 'disc', 'rest', 'src', 'note']) {
     els[id] = { textContent: '', className: '' };
   }
   return {
@@ -41,6 +40,7 @@ function run(status) {
       pressure: { level: 2, freePct: 23, swapMB: 717, reason: 'critical', source: 'daemon' },
       tabs: 7, stats: { discarded: 2, restored: 3, reclaimEstimateMB: 340 },
       source: 'daemon', lastSampleAt: 1794170367432,
+      rssLiveMB: { liveMB: 480, estimatedTabs: 0 }, storeBridge: true, processesApi: true,
     };
     const { dom } = run(live);
     await new Promise(r => setImmediate(r));
@@ -52,7 +52,39 @@ function run(status) {
     assert.strictEqual(String(dom.els.disc.textContent), '2');
     assert.strictEqual(String(dom.els.rest.textContent), '3');
     assert.strictEqual(String(dom.els.src.textContent), 'daemon');
+    assert.strictEqual(String(dom.els.rss.textContent), '480 MB');
+    assert.strictEqual(String(dom.els.note.textContent), 'all systems reporting');
     console.log('live status painted field-by-field: OK');
+  }
+
+  // 1b) real RSS renders with an honest estimate count
+  {
+    const live = {
+      pressure: { level: 2, freePct: 23, swapMB: 717, reason: 'critical', source: 'daemon' },
+      tabs: 7, stats: { discarded: 2, restored: 3 },
+      source: 'daemon', rssLiveMB: { liveMB: 480, estimatedTabs: 3 },
+      storeBridge: true, processesApi: true,
+    };
+    const { dom } = run(live);
+    await new Promise(r => setImmediate(r));
+    assert.strictEqual(String(dom.els.rss.textContent), '480 MB + 3 est.');
+    console.log('real RSS + estimate count: OK');
+  }
+
+  // 1c) missing processes API must be named in the footer, not hidden
+  {
+    const live = {
+      pressure: { level: 2, freePct: 23, swapMB: 717, reason: 'critical', source: 'daemon' },
+      tabs: 7, stats: {}, rssLiveMB: { liveMB: 0, estimatedTabs: 7 },
+      source: 'daemon', storeBridge: false, processesApi: false,
+      lastError: 'processes-api-absent',
+    };
+    const { dom } = run(live);
+    await new Promise(r => setImmediate(r));
+    assert.match(String(dom.els.note.textContent), /per-tab RSS unavailable/);
+    assert.match(String(dom.els.note.textContent), /processes-api-absent/);
+    assert.strictEqual(String(dom.els.rss.textContent), 'measuring…');
+    console.log('missing processes API reported honestly: OK');
   }
 
   // 2) stale snapshot (daemon down) still renders, says so

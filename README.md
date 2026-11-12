@@ -1,6 +1,6 @@
 # ChromeRAMFix 🪦
 
-**80–90% less RAM for Google Chrome. Zero flash. Zero lost tabs.**
+**Google Chrome, har idle tab 0 MB. Zero flash. Zero lost tabs.**
 
 ChromeRAMFix is an invisible, sub-millisecond tab compression and memory recovery engine for **Google Chrome**, **Brave**, **Microsoft Edge**, **Arc**, and any Chromium browser on **macOS (Apple Silicon / Intel)** and **Windows 10/11**.
 
@@ -42,7 +42,7 @@ Google Chrome creates an isolated operating system process for every open tab (`
   │                                                           │
   │  ┌───────────────────────┐     ┌───────────────────────┐  │
   │  │  Governor Daemon      │     │  Cemetery Store       │  │
-  │  │  macOS: Mach Pressure │     │  macOS: Rust mmap     │  │
+  │  │  macOS: Mach Pressure │     │  macOS: Rust store    │  │
   │  │  Win: GlobalMemoryEx  │     │  Win: Local Win32     │  │
   │  │  Published on :8795   │     │  0.048 ms retrieval   │  │
   │  └───────────────────────┘     └───────────────────────┘  │
@@ -91,7 +91,7 @@ Every number below was directly measured and verified via automated test harness
 
 #### 1-Command Engine Install:
 ```bash
-git clone https://github.com/RoyalInnsog/chrome-ram-fix.git
+git clone <repo-url>   # account restore ke baad push hoga
 cd chrome-cemetery
 bash install.sh
 ```

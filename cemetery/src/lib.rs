@@ -1,4 +1,4 @@
-// cemetery — compressed snapshot store with mmap-backed shared access.
+// cemetery — compressed snapshot store with lock-guarded durable file access.
 //
 // Zero dependencies (std only): ffmpeg/zstd aren't guaranteed present on this box,
 // so the whole thing runs on `Deflater`-style custom compression we own.
@@ -7,7 +7,7 @@
 //   [header]  4B magic "CMTR", 1B version, 3B reserved
 //   [slots]   each slot: 4B key hash, 2B payload len, 2B flags, 8B atime, payload
 //   Slots are appended; reads walk the file. Writers hold an exclusive flock
-//   on a sidecar `.lock`; mmap readers use MAP_SHARED so a live reader never
+//   on a sidecar `.lock`; readers use seek+read_exact so a live reader never
 //   copies and never blocks.
 //
 // Predictive wake: each slot carries an `atime` (unix secs). `warm_next`
