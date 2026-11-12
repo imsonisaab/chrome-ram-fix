@@ -90,16 +90,86 @@ function classify(snap) {
 }
 function SnapSafe(n) { return typeof n === 'number' ? n : 0; }
 
-function sample() {
+// --- browser-scoped pressure -------------------------------------------------
+// The kernel numbers describe the WHOLE machine (Hermes, omniroute, a stray
+// automation browser). Those are not what the owner wants to see, and more
+// importantly they are not what this extension can influence: it can only
+// discard browser tabs. So report the browser's own footprint alongside, and
+// derive a browser pressure level from the browser's share of available RAM.
+const PS = '/bin/ps';
+
+// Sum resident memory of every process whose command matches the browser name.
+// Returns { mb, procs }. Fails soft to { mb: 0, procs: 0 } so a missing ps
+// never breaks the pressure read.
+function browserFootprint(browserName) {
+  // Empty name must NOT match every process (''.indexOf always returns 0).
+  // Without a name there is no browser to scope to: report nothing.
+  if (!browserName) return { mb: 0, procs: 0 };
+  try {
+    const out = nodeExec(PS, ['-axo', 'rss=,comm='], { encoding: 'utf8', timeout: 4000 });
+    let mb = 0, procs = 0;
+    for (const line of out.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const rss = parseInt(trimmed, 10);
+      if (!Number.isFinite(rss)) continue;
+      if (line.indexOf(browserName) === -1) continue;
+      mb += rss;
+      procs += 1;
+    }
+    return { mb: Math.round(mb / 1024), procs };
+  } catch (_) {
+    return { mb: 0, procs: 0 };
+  }
+}
+
+/**
+ * classifyBrowser(fp, snap) -> { browserMB, browserPct, browserLevel }
+ * browserPct = the browser's own RAM as a share of total system RAM.
+ * browserLevel is what the extension acts on:
+ *   >=45%  -> 4 terminal  (the browser alone is choking the machine)
+ *   >=30%  -> 3 severe
+ *   >=18%  -> 2 critical
+ *   >=10%  -> 1 warn
+ *   else   -> 0 normal
+ * Deliberately stricter than the system thresholds: a browser taking 45% of
+ * a 16 GB machine has 7 GB of tabs and is the problem, regardless of what the
+ * rest of the system is doing.
+ */
+function classifyBrowser(fp, snap) {
+  const totalMB = (snap && snap.totalMB) || 0;
+  const browserPct = totalMB > 0 && fp.mb > 0 ? Math.round((fp.mb / totalMB) * 100) : 0;
+  let browserLevel = 0;
+  if (browserPct >= 45) browserLevel = 4;
+  else if (browserPct >= 30) browserLevel = 3;
+  else if (browserPct >= 18) browserLevel = 2;
+  else if (browserPct >= 10) browserLevel = 1;
+  return { browserMB: fp.mb, browserProcs: fp.procs, browserPct, browserLevel };
+}
+
+function sample(browserName) {
   const vs = vmStat();
   const sw = swapUsage();
-  return Object.assign(classify({ ...vs, swapMB: sw.usedMB }), { raw: { vmStat: vs, swap: sw } });
+  const sys = classify({ ...vs, swapMB: sw.usedMB });
+  const fp = browserFootprint(browserName || '');
+  const br = classifyBrowser(fp, sys);
+  // The extension acts on the WORSE of the two: if the browser is the hog, act
+  // on it; if the whole machine is under attack, act on that.
+  const level = Math.max(sys.level, br.browserLevel);
+  const reason = level === sys.level ? sys.reason : `browser ${br.browserPct}%`;
+  return {
+    level, freePct: sys.freePct, swapMB: sys.swapMB, reason,
+    totalMB: sys.totalMB,
+    browserMB: br.browserMB, browserProcs: br.browserProcs, browserPct: br.browserPct,
+    browserLevel: br.browserLevel,
+    raw: { vmStat: vs, swap: sw, browser: fp },
+  };
 }
 
 /* UMD footer: same file works in Node (require) and as a browser script.
    In a browser the exported names land on window. */
 ;(function (g) {
-  var ex = { vmStat, swapUsage, classify, sample };
+  var ex = { vmStat, swapUsage, classify, classifyBrowser, sample };
   if (typeof module !== 'undefined' && module.exports) { module.exports = ex; }
   else { g.GovernorPressure = ex; g.__UmdBundle = Object.assign(g.__UmdBundle || {}, ex); }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

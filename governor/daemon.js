@@ -21,11 +21,19 @@ const server = http.createServer((req, res) => {
     return;
   }
   try {
-    const s = sample();
+    // ?browser=Brave+Browser scopes the report to one browser's own footprint.
+    // Default: no browser name -> system-wide numbers only (backwards compatible).
+    const qs = req.url.split('?')[1] || '';
+    const browserName = new URLSearchParams(qs).get('browser') || '';
+    const s = sample(browserName);
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({
       level: s.level, freePct: s.freePct, swapMB: s.swapMB,
       reason: s.reason, totalMB: s.totalMB, at: Date.now(),
+      // browser-scoped: what the extension actually controls
+      browser: browserName || null,
+      browserMB: s.browserMB, browserPct: s.browserPct,
+      browserLevel: s.browserLevel, browserProcs: s.browserProcs,
     }));
   } catch (e) {
     res.writeHead(500, { 'Content-Type': 'application/json' });

@@ -45,7 +45,8 @@ const CFG = {
 const State = {
   tabs: new Map(),        // tabId -> { id, url, lastActiveAt, rssMB, discarded, pinned, audible, lastTypedAt, liveSocket }
   activeTabId: null,
-  pressure: { level: 0, freePct: 100, swapMB: 0, reason: 'normal', source: 'fallback' },
+  pressure: { level: 0, freePct: 100, swapMB: 0, reason: 'normal', source: 'fallback',
+              browserMB: 0, browserPct: 0, browserLevel: 0, browserProcs: 0 },
   lastSampleAt: null,
   protectedUrls: new Set(),   // forms mid-edit; populated by content scripts
   wakeCount: 0,
@@ -199,7 +200,13 @@ async function tick() {
     snap = await GOVPressure.sample();
   } catch (e) {
     State.lastError = String((e && e.message) || e);
-    snap = { level: State.pressure.level, freePct: State.pressure.freePct, swapMB: State.pressure.swapMB, reason: State.pressure.reason, source: 'stale' };
+    // Keep the last known browser footprint: the popup must not flip to "—"
+    // and lose the browser number just because one sample failed.
+    const prev = State.pressure || {};
+    snap = { level: prev.level ?? 0, freePct: prev.freePct ?? 100, swapMB: prev.swapMB ?? 0,
+             reason: prev.reason ?? 'stale', source: 'stale',
+             browserMB: prev.browserMB ?? 0, browserPct: prev.browserPct ?? 0,
+             browserLevel: prev.browserLevel ?? 0, browserProcs: prev.browserProcs ?? 0 };
   }
   State.pressure = snap;
   State.lastSampleAt = Date.now();
