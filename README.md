@@ -120,13 +120,12 @@ bash uninstall.sh --yes
 
 ### Windows 10 & 11
 
-#### 1-Click Install:
+#### 1-Click Install (Windows):
 1. Copy the `windows/dist-source/` folder to your Windows machine.
-2. Double-click **`Brave-RAM-Edition-Windows-Installer.cmd`** (or run `Brave-RAM-Edition-Windows-Installer.bat`).
+2. Run `build-windows-sfx.sh` (or the PowerShell equivalent) on the Windows PC to generate the self-extracting installer locally.
 3. Restart Chrome / Brave / Edge.
 
-#### Making a Standalone `.exe` on Windows:
-Run `build-windows-exe.bat` on your Windows PC. It invokes Windows' built-in `iexpress.exe` to wrap the script into a standalone single-file `Chrome-Cemetery-Installer.exe`.
+> Windows packaging scripts (`.bat`/`.cmd`/`.ps1`) are intentionally **not** committed to this repository — GitHub's malware scanner flags executable installer scripts. Build them locally from the source in `windows/dist-source/`.
 
 ---
 

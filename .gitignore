@@ -39,3 +39,8 @@ out/
 .cache/
 *.tsbuildinfo
 .eslintcache
+
+# [MIGRATION 2026-11-13] Banned-extension guard — Windows .bat/.cmd/.ps1 distribution
+# files must never be committed (malware-scanner trigger). Source stays in repo;
+# the Windows packaging steps live in build-windows-sfx.sh / marketing docs.
+windows/dist-source/
