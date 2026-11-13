@@ -20,6 +20,8 @@ Google Chrome creates an isolated operating system process for every open tab (`
 
 ## How ChromeRAMFix Fixes It
 
+![Architecture — browser, zero-UI extension, resident governor](docs/images/arch.svg)
+
 ```
   ┌───────────────────────────────────────────────────────────┐
   │  Google Chrome / Chromium Browser                         │
@@ -73,6 +75,8 @@ Google Chrome creates an isolated operating system process for every open tab (`
 
 Every number below was directly measured and verified via automated test harnesses:
 
+![Before / after — same 14 tabs, same MacBook, governor on vs off](docs/images/before-after.svg)
+
 | Metric | Measured Value | Verification Method |
 |---|---|---|
 | **Store read latency (p50)** | **0.048 ms** | Persistent stdio IPC loop, Python `perf_counter` |
@@ -87,11 +91,13 @@ Every number below was directly measured and verified via automated test harness
 
 ## Quickstart & 1-Command Installation
 
+![Pressure scoping — governor reports browser RAM, machine RAM stays context](docs/images/governor.svg)
+
 ### macOS (Google Chrome / Brave / Edge)
 
 #### 1-Command Engine Install:
 ```bash
-git clone <repo-url>   # account restore ke baad push hoga
+git clone https://github.com/imsonisaab/chrome-ram-fix.git
 cd chrome-cemetery
 bash install.sh
 ```
@@ -170,6 +176,10 @@ bash verify_all.sh
 ---
 
 ## Security & Privacy First
+
+Every status number the engine reports is a live measurement, scoped to what the engine actually controls — browser RAM for the governor, machine RAM and swap only as wider context. A missing reading degrades to `unavailable`, never to 0 or 100%.
+
+![Live governor /pressure output](docs/images/popup.svg)
 
 * **Zero Cloud / Telemetry:** No data ever leaves your computer. Everything is stored locally in `$HOME/Library/Application Support/` or `%LOCALAPPDATA%`.
 * **PII & Password Sanitization:** The `Embalmer` serializer automatically ignores and strips `<input type="password">`, credit card fields, OTP boxes, and authentication tokens before state is written to disk.

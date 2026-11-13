@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="360" viewBox="0 0 860 360" font-family="ui-sans-serif,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 z" fill="#64748b"/></marker>
+  </defs>
+  <rect x="24" y="24" width="812" height="150" rx="12" fill="#0f172a" stroke="#334155"/>
+  <text x="44" y="50" fill="#e2e8f0" font-size="15" font-weight="700">Chromium browser</text>
+  <rect x="44" y="66" width="180" height="70" rx="8" fill="#14532d" stroke="#22c55e"/>
+  <text x="60" y="90" fill="#dcfce7" font-size="12" font-weight="700">ACTIVE TAB</text>
+  <text x="60" y="108" fill="#86efac" font-size="11">never touched</text>
+  <text x="60" y="124" fill="#86efac" font-size="11">~250 MB untouched</text>
+  <rect x="240" y="66" width="560" height="70" rx="8" fill="#1e293b" stroke="#475569"/>
+  <text x="256" y="90" fill="#cbd5e1" font-size="12" font-weight="700">IDLE BACKGROUND TABS</text>
+  <g fill="#7f1d1d" stroke="#ef4444">
+    <rect x="256" y="98" width="120" height="30" rx="5"/><rect x="386" y="98" width="120" height="30" rx="5"/>
+    <rect x="516" y="98" width="120" height="30" rx="5"/><rect x="646" y="98" width="140" height="30" rx="5"/>
+  </g>
+  <text x="266" y="118" fill="#fecaca" font-size="11">150 MB</text>
+  <text x="396" y="118" fill="#fecaca" font-size="11">142 MB</text>
+  <text x="526" y="118" fill="#fecaca" font-size="11">138 MB</text>
+  <text x="656" y="118" fill="#fecaca" font-size="11">135 MB  → ~15 MB</text>
+  <rect x="24" y="196" width="812" height="60" rx="12" fill="#111827" stroke="#334155"/>
+  <text x="44" y="220" fill="#e2e8f0" font-size="12" font-weight="700">ChromeRAMFix extension (Manifest V3, zero UI)</text>
+  <text x="44" y="242" fill="#94a3b8" font-size="12">watches lastActivity + idle service worker · discards only below the storage floor · keeps session data</text>
+  <rect x="24" y="278" width="812" height="58" rx="12" fill="#0b1220" stroke="#334155"/>
+  <text x="44" y="302" fill="#e2e8f0" font-size="12" font-weight="700">Resident governor daemon (launchd, :8795)</text>
+  <text x="44" y="324" fill="#94a3b8" font-size="12">absolute paths /usr/sbin/sysctl + /usr/bin/vm_stat · kern.memorystatus_vm_pressure_level · scoped to browser RAM</text>
+  <g stroke="#64748b" stroke-width="1.5" marker-end="url(#ar)" fill="none">
+    <path d="M430 176 L430 194"/><path d="M430 258 L430 276"/>
+  </g>
+</svg>
+echo "arch.svg bytes: $(wc -c < arch.svg)"
