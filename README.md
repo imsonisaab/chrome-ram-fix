@@ -93,6 +93,12 @@ Every number below was directly measured and verified via automated test harness
 
 ![Pressure scoping — governor reports browser RAM, machine RAM stays context](docs/images/governor.svg)
 
+> No binary ships in a release — the engine is a resident daemon plus an
+> unpacked extension, both installed from source by `install.sh`. There is
+> no signed package to download, and the private store writes outside git.
+>
+> Full install, idle-window tuning, verification commands and uninstall:
+> [docs/INSTALL_AND_BUILD.md](docs/INSTALL_AND_BUILD.md)
 ### macOS (Google Chrome / Brave / Edge)
 
 #### 1-Command Engine Install:
