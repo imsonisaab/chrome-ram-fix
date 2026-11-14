@@ -78,6 +78,9 @@ function swapUsage() {
  * the visible symptom was "memory already gone, nothing happens".
  */
 function classify(snap) {
+  // total = RAM buckets only. swapMB is NOT added here: it already
+  // escalates the level via the >1024 / >3072 gates below, so counting it in
+  // both places double-charges it and collapses freePct.
   const total = snap.free + snap.active + snap.inactive + snap.speculative + snap.wired + SnapSafe(snap.compressed);
   const usable = snap.free + snap.inactive + snap.speculative + SnapSafe(snap.purgeable);
   const freePct = total > 0 ? Math.round((usable / total) * 100) : 0;
