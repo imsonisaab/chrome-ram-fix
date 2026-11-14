@@ -21,25 +21,42 @@ console.log('[governor] GOVPolicy=', typeof GOVPolicy, 'decide=', typeof GOVPoli
 const CFG = {
   pollMs: 2500,
   maxAttempts: 3,
-  // Smart pressure tuning — a real user kills a tab 3-5 min after they leave
-  // it; earlier than that and you resurrect tabs they were still reading.
-  // Aggressive idle policy: 2 minutes background idle -> eligible; 45 seconds
-  // when the kernel is already swapping hard (swap > 500 MB) or at pressure
-  // >= L1. Below 2 min users lose tabs they were still reading.
-  discardIdleMs: 2 * 60 * 1000,     // 2 min background idle -> eligible
-  discardIdlePressureMs: 45 * 1000, // swap>500MB or pressure>=L1: 45 s rule
-  pressureSwapFloorMB: 500,         // swap above this = "under pressure" early
-  pressureLevelFloor: 1,            // kernel pressure >= L1 = "under pressure"
+  // Idle floors are deliberately LONG. A tab discarded while the user is
+  // still reading it (or while a response is streaming into it) costs a
+  // reload, a re-typing, a dropped SSE stream — that is a net loss. The former
+  // 45 s panic floor fired on tabs the user had literally just left, and it
+  // triggered off OTHER apps' memory traffic: on this 16 GB machine swap
+  // from unrelated work sat above 500 MB permanently, so the panic rule was
+  // effectively always on. 15 min normal / 10 min at L4.
+  discardIdleMs: 15 * 60 * 1000,    // 15 min background idle -> eligible
+  discardIdlePressureMs: 10 * 60 * 1000, // L4 panic floor: 10 min, not 45 s
+  pressureSwapFloorMB: 1024,        // only real swap debt counts as pressure
+  pressureLevelFloor: 2,            // L2+ before the shorter floor applies
   bootIdleMs: 30 * 60 * 1000,      // after a SW restart, tabs are presumed idle
   protectAudible: true,            // audio/video playing tabs
   protectPinned: true,
   protectActive: true,             // the focused tab is never touched
   protectTypedMs: 60 * 1000,       // user typed here <60 s ago -> protected
+  protectLastAudioMs: 10 * 60 * 1000, // played audio <10 min ago -> protected
+  minTabsBeforeDiscard: 6,         // <6 live tabs: nothing is ever discarded
+  audioGraceMs: 10 * 60 * 1000,    // policy-side audio grace window
+  // Tabs holding a live session we cannot reconstruct. AI consoles mid-reply
+  // and streaming video are the two cases that actually cost the user
+  // something when cut, so they are protected by URL in addition to the
+  // live-socket/DOM-heartbeat signals.
   protectMeetUrls: [               // live sockets / conferencing never die
     'meet.google.com', 'zoom.us', 'teams.microsoft.com', 'web.whatsapp.com',
     'discord.com/channels', 'slack.com', 'whereby.com', 'around.co',
   ],
+  protectLiveUrls: [               // AI consoles, streaming, local dev servers
+    'chatgpt.com', 'chat.openai.com', 'claude.ai', 'arena.ai', 'gemini.google.com',
+    'aistudio.google.com', 'perplexity.ai', 'youtube.com', 'twitch.tv',
+    'netflix.com', 'hotstar.com', 'jiohotstar.com', 'meet.google.com',
+    'copilot.microsoft.com', 'poe.com', 'huggingface.co',
+    'localhost', '127.0.0.1', '0.0.0.0', '[::1]',
+  ],
   protectLiveSocket: true,          // open WebSocket / fetch -> do not discard
+  busyHeartbeatMs: 60 * 1000,      // DOM mutated <60 s ago -> tab is busy
 };
 
 const State = {
@@ -54,15 +71,22 @@ const State = {
   forceTicks: 0,
   warmQueue: [],
   stats: { discarded: 0, restored: 0, reclaimEstimateMB: 0 },
+  paused: false,          // set by the context menu
+  lastDecision: null,     // why the last pass did (or did not) discard
 };
 
 // URLs that hold a live session/stream: killing them loses the session state,
-// not just RAM. Derived from CFG.protectMeetUrls.
+// not just RAM. Covers conferencing (protectMeetUrls) plus AI consoles,
+// streaming and local dev servers (protectLiveUrls).
+// Matched on hostname, not host: URL.host includes the port, so
+// "localhost:3000" would never equal "localhost" and every dev server would
+// be discardable.
 function isProtectedLiveUrl(url) {
   if (!url) return false;
   try {
     const u = new URL(url);
-    return CFG.protectMeetUrls.some(h => u.host === h || u.host.endsWith('.' + h));
+    const hosts = CFG.protectMeetUrls.concat(CFG.protectLiveUrls);
+    return hosts.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
   } catch (_) { return false; }
 }
 
@@ -195,6 +219,8 @@ async function predictWarm() {
 
 // ---- the discard/reawaken cycle ------------------------------------------
 async function tick() {
+  // Paused via the context menu: no sampling, no decisions, nothing touched.
+  if (State.paused) return;
   let snap;
   try {
     snap = await GOVPressure.sample();
@@ -214,26 +240,35 @@ async function tick() {
   await predictWarm();
   await refreshRss();   // real per-tab RSS before any discard decision
 
+  // "Under pressure" = kernel pressure >= L2 OR real swap debt. Other apps'
+  // traffic on a 16 GB machine pushed swap over 500 MB permanently, which used
+  // to pin the panic floor permanently ON. The pressure floor now applies only
+  // at L2+ and only above 1 GB of genuine swap.
   const now = Date.now();
-  // "Under pressure" = kernel pressure >= L1 OR swap already over the floor.
-  // Either one drops the idle floor to the aggressive 45 s rule.
   const underPressure = State.pressure.level >= CFG.pressureLevelFloor
     || State.pressure.swapMB >= CFG.pressureSwapFloorMB;
   const idleFloor = underPressure ? CFG.discardIdlePressureMs : CFG.discardIdleMs;
 
+  const liveTabCount = [...State.tabs.values()].filter(t => !t.discarded).length;
+
   const tabs = [...State.tabs.values()].map(t => {
     const age = now - (t.lastActiveAt || 0);
-    // typed-in-the-last-60s and live-socket tabs are protected like pinned ones
+    // typed-in-the-last-60s, live-socket, live-URL, busy-DOM and recently
+    // audible tabs are all protected like pinned ones.
     const typedRecently = (t.lastTypedAt && now - t.lastTypedAt < CFG.protectTypedMs);
     const liveUrl = CFG.protectLiveSocket && isProtectedLiveUrl(t.url);
+    const busyDom = (t.lastDomMutAt && now - t.lastDomMutAt < CFG.busyHeartbeatMs);
+    const audioRecent = (t.lastAudioAt && now - t.lastAudioAt < CFG.protectLastAudioMs);
     return {
       id: t.id, url: t.url, lastActiveAt: t.lastActiveAt,
+      lastAudioAt: t.lastAudioAt || 0,
       rssMB: t.rssMB, discarded: t.discarded,
-      pinned: CFG.protectPinned && (t.pinned || typedRecently || t.liveSocket || liveUrl),
+      pinned: CFG.protectPinned && (t.pinned || typedRecently || t.liveSocket
+                                    || liveUrl || busyDom || audioRecent),
       audible: CFG.protectAudible && t.audible,
       ageMs: age,
       idleMs: idleFloor,
-      protected: typedRecently || liveUrl,   // reason tag for UI/telemetry
+      protected: typedRecently || liveUrl || busyDom || audioRecent,
     };
   });
 
@@ -241,13 +276,24 @@ async function tick() {
     now: Date.now(),
     activeTabId: CFG.protectActive ? State.activeTabId : null,
     protectedUrls: [...State.protectedUrls],
+    minTabsBeforeDiscard: CFG.minTabsBeforeDiscard,
+    audioGraceMs: CFG.audioGraceMs,
   });
+  State.lastDecision = { reason: decision.reason, liveTabs: liveTabCount,
+                         minTabs: CFG.minTabsBeforeDiscard, idleFloor, at: now };
 
   for (const a of decision.actions) {
     if (a.type !== 'discard') continue;
     const tab = State.tabs.get(a.tabId);
     if (!tab || tab.discarded) continue;
     if (Date.now() - (tab.lastActiveAt || 0) < idleFloor) continue; // too young
+    // Last-line guards, independent of the policy's own arithmetic: a
+    // manually protected tab, an active-socket tab, a busy-DOM tab or a tab
+    // that just produced audio is never discarded, at any level.
+    if (State.protectedUrls.has(tab.url)) continue;
+    if (tab.liveSocket) continue;
+    if (tab.lastDomMutAt && Date.now() - tab.lastDomMutAt < CFG.busyHeartbeatMs) continue;
+    if (tab.lastAudioAt && Date.now() - tab.lastAudioAt < CFG.protectLastAudioMs) continue;
 
     // Embaler bridge: capture BEFORE the discard (MV3: background owns the capture
     // call; content script is dead once discarded, so we capture via CDP-lite here).
@@ -319,6 +365,42 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     reply({ ok: true });
     return true;
   }
+  if (msg.type === 'EMBAL_BUSY') {
+    // Active-stream heartbeat: the page's DOM changed in the last sampling
+    // window (an AI answer still arriving, a video advancing, a build log
+    // streaming). Mark THIS url's tabs busy so the discard skip above holds.
+    const t = Date.now();
+    for (const tab of State.tabs.values()) {
+      if (tab.url === msg.url) tab.lastDomMutAt = t;
+    }
+    reply({ ok: true });
+    return true;
+  }
+  if (msg.type === 'EMBAL_AUDIO') {
+    // Audio state changed in a tab: remembered as a timestamp, so a tab that
+    // was audible in the last 10 minutes stays protected even after it goes
+    // quiet (a paused stream is still a stream the user is returning to).
+    for (const tab of State.tabs.values()) {
+      if (tab.url === msg.url) {
+        tab.lastAudioAt = msg.on ? Date.now() : (tab.lastAudioAt || 0);
+        if (msg.on) tab.audible = true;
+      }
+    }
+    reply({ ok: true });
+    return true;
+  }
+  if (msg.type === 'GOV_PAUSE') {
+    State.paused = !!msg.on;
+    reply({ ok: true, paused: State.paused });
+    return true;
+  }
+  if (msg.type === 'GOV_PROTECT_TAB') {
+    const t = State.tabs.get(msg.tabId);
+    const url = (t && t.url) || msg.url;
+    if (msg.on) State.protectedUrls.add(url); else State.protectedUrls.delete(url);
+    reply({ ok: true, url });
+    return true;
+  }
   if (msg.type === 'EMBAL_PROXIMITY') {
     prewarmFrom([{ type: 'proximity', tabId: msg.tabId, index: msg.windowIndex, distanceMs: msg.distanceMs }]);
     reply({ ok: true });
@@ -341,6 +423,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         rssLiveMB: rssLive(), processesApi: HAS_PROCESSES_API,
         keepAlive: keepAliveAlive, pollMs: CFG.pollMs,
         alarmsFloorMin: 1,
+        paused: State.paused, lastDecision: State.lastDecision,
+        protectedUrls: [...State.protectedUrls],
       });
     } catch (e) {
       console.error('[governor] GOV_STATUS err', e && e.message);
@@ -349,6 +433,61 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
   return true;
 });
+
+// ---- silent context menu (no toolbar popup, no visible UI) -----------------
+// The engine is invisible: no icon, no panel, no popup. The only controls are
+// two right-click entries on a page, so a user can always reach a stop switch.
+// chrome.contextMenus is idempotent per id, so a worker restart is safe.
+function buildContextMenus() {
+  if (typeof chrome === 'undefined' || !chrome.contextMenus) return;
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'cemetery-pause', title: 'Pause / Resume ChromeRAMFix',
+      contexts: ['page'],
+    });
+    chrome.contextMenus.create({
+      id: 'cemetery-protect', title: 'Protect this tab from sleep',
+      contexts: ['page'],
+    });
+  });
+}
+buildContextMenus();
+if (chrome.contextMenus && chrome.contextMenus.onClicked) {
+  chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (!tab) return;
+    if (info.menuItemId === 'cemetery-pause') {
+      State.paused = !State.paused;
+      badgeState();
+      return;
+    }
+    if (info.menuItemId === 'cemetery-protect') {
+      const t = State.tabs.get(tab.id);
+      const url = (t && t.url) || tab.url;
+      if (url) {
+        if (State.protectedUrls.has(url)) State.protectedUrls.delete(url);
+        else State.protectedUrls.add(url);
+      }
+    }
+  });
+}
+
+// Badge on the toolbar icon: "II" while paused, blank while running. No
+// popup, no panel, but the pause state must never be invisible — a user who
+// thinks the engine is still active after pausing it is being lied to.
+function badgeState() {
+  if (typeof chrome === 'undefined' || !chrome.action) return;
+  try {
+    if (State.paused) {
+      chrome.action.setBadgeBackgroundColor({ color: '#888888' });
+      chrome.action.setBadgeText({ text: 'II' });
+      chrome.action.setTitle({ title: 'ChromeRAMFix — paused' });
+    } else {
+      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setTitle({ title: 'ChromeRAMFix' });
+    }
+  } catch (_) { /* action API guard: non-critical */ }
+}
+badgeState();
 
 // ---- lifecycle ------------------------------------------------------------
 chrome.tabs.onCreated.addListener(t => upsertTab({ id: t.id, url: t.url, pinned: t.pinned }));

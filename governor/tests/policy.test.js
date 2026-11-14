@@ -110,4 +110,63 @@ test('real-night: escalation L2 -> L4 grows reclaim, coldest first', () => {
   assert.ok(night(3).projectedReclaimMB > night(2).projectedReclaimMB);
 });
 
+// ---- minimum open tabs guard (user directive, 2026-11) ---------------------
+// "With only 2 tabs open... never discard anything." A handful of live tabs is
+// the user's current work, not reclaimable background furniture.
+function twoTabs() {
+  return [
+    tab('a', NOW - 60000, 400),
+    tab('b', NOW - 30000, 200),
+  ];
+}
+test('too-few-tabs: <=5 live tabs never discarded, even at L4', () => {
+  for (const lvl of [2, 3, 4]) {
+    const r = decide({ level: lvl, freePct: 5, swapMB: 6000, reason: 'terminal' },
+      twoTabs(), { now: NOW });
+    assert.strictEqual(r.actions.length, 0, `level ${lvl} discarded with 2 tabs`);
+    assert.match(r.reason, /too-few-tabs/);
+  }
+});
+test('too-few-tabs: 5 tabs is still too few, 6 is the floor', () => {
+  const five = [1, 2, 3, 4, 5].map(i => tab('t' + i, NOW - 60000 * i, 300));
+  const r5 = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, five, { now: NOW });
+  assert.strictEqual(r5.actions.length, 0, '5 tabs must be left alone');
+  assert.strictEqual(r5.reason, 'too-few-tabs (5/6)');
+
+  const six = [1, 2, 3, 4, 5, 6].map(i => tab('t' + i, NOW - 60000 * i, 300));
+  const r6 = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, six, { now: NOW });
+  assert.strictEqual(r6.actions.length, 6, '6+ tabs: normal policy resumes');
+  assert.ok(!/too-few-tabs/.test(r6.reason));
+});
+test('too-few-tabs: discarded tabs do not count toward the floor', () => {
+  // 8 tabs, 3 already discarded -> 5 live -> nothing may be discarded.
+  const mixed = [...[1, 2, 3, 4, 5, 6, 7, 8].map(i => tab('t' + i, NOW - 60000 * i, 300))];
+  mixed[0].discarded = true; mixed[1].discarded = true; mixed[2].discarded = true;
+  const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, mixed, { now: NOW });
+  assert.strictEqual(r.actions.length, 0, 'only 5 live tabs -> no discard');
+  assert.match(r.reason, /too-few-tabs/);
+});
+test('too-few-tabs guard is overridable only by explicit opt-out', () => {
+  const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' },
+    twoTabs(), { now: NOW, minTabsBeforeDiscard: 0 });
+  assert.strictEqual(r.actions.length, 2, 'explicit 0 restores the old behaviour');
+});
+
+// ---- audio grace (streaming tab that went quiet) ---------------------------
+test('recently audible tab is protected for audioGraceMs, even at L4', () => {
+  const six = [1, 2, 3, 4, 5, 6].map(i =>
+    tab('t' + i, NOW - 60000 * i, 300, i === 3 ? { lastAudioAt: NOW - 3 * 60 * 1000 } : null));
+  const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' },
+    six, { now: NOW, audioGraceMs: 10 * 60 * 1000 });
+  assert.strictEqual(r.actions.length, 5, 'audio tab survives, others go');
+  assert.ok(!r.actions.map(a => a.tabId).includes('t3'));
+});
+test('audio grace expires: 15-min-old audio does not protect at L4', () => {
+  const six = [1, 2, 3, 4, 5, 6].map(i =>
+    tab('t' + i, NOW - 60000 * i, 300, i === 3 ? { lastAudioAt: NOW - 15 * 60 * 1000 } : null));
+  const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' },
+    six, { now: NOW, audioGraceMs: 10 * 60 * 1000 });
+  assert.strictEqual(r.actions.length, 6, 'grace window has passed');
+});
+
 run();

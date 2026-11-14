@@ -102,6 +102,60 @@ function probeLiveSockets() {
   } catch (_) { live = false; }
   chrome.runtime.sendMessage({ type: 'EMBAL_LIVE_SOCKET', url: location.href, on: live }).catch(() => {});
 }
+
+// --- active-stream heartbeat ------------------------------------------------
+// An AI console mid-answer, a build log, a stock ticker: the page looks idle
+// to chrome.tabs (no clicks, no typing, audio off) but its content is arriving
+// right now, and discarding it cuts the stream off. A MutationObserver on the
+// document is the cheapest signal that something is still writing to the DOM.
+// Only the fact "it changed" is reported — never what changed: this must not
+// become a page-content exfiltration path.
+let lastBusySent = 0;
+function reportBusy() {
+  const t = Date.now();
+  if (t - lastBusySent < 5000) return;          // coalesce: at most one / 5 s
+  lastBusySent = t;
+  chrome.runtime.sendMessage({ type: 'EMBAL_BUSY', url: location.href, at: t }).catch(() => {});
+}
+let domBeat = null;
+function startDomHeartbeat() {
+  if (domBeat) return;
+  try {
+    let pending = false;
+    domBeat = new MutationObserver(() => { pending = true; });
+    domBeat.observe(document.documentElement, {
+      childList: true, subtree: true, characterData: true,
+    });
+    // Sample on a slow interval so a chatty page cannot flood the worker.
+    setInterval(() => {
+      if (!pending) return;
+      pending = false;
+      reportBusy();
+    }, 15000);                                   // 4 busy pings / minute max
+  } catch (_) {
+    // No MutationObserver (or a detached doc): the URL allowlist and the
+    // live-socket check still cover the important streaming cases.
+    domBeat = null;
+  }
+}
+
+// --- audio state ------------------------------------------------------------
+// Audible tabs are already protected; this also catches the tab that went
+// quiet 3 minutes ago, which the tab events alone report as silent.
+function reportAudio(on) {
+  chrome.runtime.sendMessage({ type: 'EMBAL_AUDIO', url: location.href, on: !!on }).catch(() => {});
+}
+function startAudioWatch() {
+  try {
+    const els = document.querySelectorAll('video, audio');
+    for (const el of els) {
+      if (el.__cemeteryAudioWatched) continue;
+      el.__cemeteryAudioWatched = true;
+      el.addEventListener('play', () => reportAudio(true), { passive: true });
+      el.addEventListener('pause', () => reportAudio(false), { passive: true });
+    }
+  } catch (_) { /* querySelectorAll can throw in a torn-down document */ }
+}
 try {
   const NativeWs = window.WebSocket;
   if (typeof NativeWs === 'function') {
@@ -145,6 +199,8 @@ document.addEventListener('keydown', reportTyped, true);
 document.addEventListener('compositionstart', reportTyped, true);
 setInterval(probeLiveSockets, 5000);
 probeLiveSockets();
+startDomHeartbeat();
+setInterval(startAudioWatch, 5000);   // players mount late on streaming sites
 
 // --- capture / restore on worker request ----------------------------------
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {

@@ -257,28 +257,36 @@ const TERMINAL = { level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' };
   assert.deepStrictEqual(d3, [], 'level-0 must never discard');
   console.log('level-0 idle: no discard (OK)');
 
-  // ============ SCENARIO 3b: idle floors are 2 min / 45 s =================
-  // Reported bug: background tabs waited 15 minutes before being compressed
-  // and discarded. The contract is now 2 min normally, 45 s when the kernel is
-  // already under pressure (swap > 500 MB or kernel level >= 1).
+  // ============ SCENARIO 3b: idle floors are 15 min / 10 min ================
+  // Regression that triggered this: the old 2 min / 45 s floors (the 45 s one
+  // gated on OTHER apps' swap traffic, which on a 16 GB machine is permanent)
+  // discarded tabs the user was still using, mid AI-generation and mid-stream.
+  // The contract is now 15 min normally and never shorter than 10 min even at
+  // L4: a tab must be genuinely forgotten before it is compaction fuel.
   {
     const CFGSRC = fs.readFileSync(path.join(ROOT, 'extension/src/background.js'), 'utf8');
     const m = /discardIdleMs:\s*([0-9]+)\s*\*\s*60\s*\*\s*1000/.exec(CFGSRC);
     assert.ok(m, 'discardIdleMs must be expressed in minutes');
-    assert.strictEqual(parseInt(m[1], 10), 2, 'default idle floor must be 2 minutes');
-    const mp = /discardIdlePressureMs:\s*([0-9]+)\s*\*\s*1000/.exec(CFGSRC);
-    assert.ok(mp, 'discardIdlePressureMs must be expressed in seconds');
-    assert.strictEqual(parseInt(mp[1], 10), 45, 'pressure idle floor must be 45 seconds');
+    assert.strictEqual(parseInt(m[1], 10), 15, 'default idle floor must be 15 minutes');
+    const mp = /discardIdlePressureMs:\s*([0-9]+)\s*\*\s*60\s*\*\s*1000/.exec(CFGSRC);
+    assert.ok(mp, 'discardIdlePressureMs must be expressed in minutes');
+    assert.strictEqual(parseInt(mp[1], 10), 10, 'L4 idle floor must be 10 minutes, never 45 s');
     assert.ok(CBOT_SWAP_FLOOR(CFGSRC), 'a swap floor for early pressure must exist');
-    console.log('idle floors: 120000 ms normal, 45000 ms under pressure (OK)');
+    assert.ok(/pressureLevelFloor:\s*2/.test(CFGSRC),
+      'the panic floor must require L2+, not L1 — other apps must not push us into it');
+    assert.ok(/minTabsBeforeDiscard:\s*6/.test(CFGSRC),
+      'a minimum open tab guard must be configured');
+    console.log('idle floors: 900000 ms normal, 600000 ms at L4 (OK)');
 
     // behaviour: eligibility boundaries around both floors
-    const floorNormal = 2 * 60 * 1000;
-    const floorPressure = 45 * 1000;
-    assert.ok(60 * 1000 < floorNormal, 'a 60 s idle tab must NOT be eligible normally');
-    assert.ok(121 * 1000 > floorNormal, 'a 121 s idle tab MUST be eligible normally');
-    assert.ok(44 * 1000 < floorPressure, 'a 44 s idle tab must NOT be eligible under pressure');
-    assert.ok(46 * 1000 > floorPressure, 'a 46 s idle tab MUST be eligible under pressure');
+    const floorNormal = 15 * 60 * 1000;
+    const floorPressure = 10 * 60 * 1000;
+    assert.ok(14 * 60 * 1000 < floorNormal, 'a 14 min idle tab must NOT be eligible normally');
+    assert.ok(16 * 60 * 1000 > floorNormal, 'a 16 min idle tab MUST be eligible normally');
+    assert.ok(9 * 60 * 1000 < floorPressure, 'a 9 min idle tab must NOT be eligible at L4');
+    assert.ok(11 * 60 * 1000 > floorPressure, 'an 11 min idle tab MUST be eligible at L4');
+    // the old panic rule left a 45 s window: a tab idled for 60 s must be safe
+    assert.ok(60 * 1000 < floorPressure, 'a 60 s idle tab must NOT be eligible at L4');
     console.log('idle eligibility boundaries verified (OK)');
   }
 

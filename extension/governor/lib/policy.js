@@ -3,7 +3,7 @@
 'use strict';
 
 /**
- * tabs: [{ id, url, title, lastActiveAt, rssMB, discarded }]
+ * tabs: [{ id, url, title, lastActiveAt, lastAudioAt, rssMB, discarded, pinned, audible }]
  * pressure: { level, freePct, swapMB, reason }
  *
  * Policy (coldest = least-recently-active first):
@@ -11,24 +11,44 @@
  *   level 2   : discard coldest until projected reclaim >= 25% of tab RSS
  *   level 3   : discard aggressively (target >= 60% of non-discarded tabs)
  *   level 4   : discard everything discardable + signal emergency
- * Never discards: the active (focused) tab or pinned/audible tabs.
+ * Never discards: the active (focused) tab, pinned tabs, audible tabs, or
+ *   tabs that played audio within `audioGraceMs`.
+ *
+ * HARD FLOOR (minTabsBeforeDiscard): if the browser is holding fewer than
+ * minTabsBeforeDiscard live tabs, discarding is refused outright. A user
+ * working with 2-5 open tabs has no forgotten background furniture — those
+ * tabs are the work. L4 from other apps' memory traffic must not cost them a
+ * reload. Default 6, i.e. 6+ tabs before anything is eligible at all.
  */
+const DEFAULTS = { minTabsBeforeDiscard: 6, audioGraceMs: 10 * 60 * 1000 };
+
 function decide(pressure, tabs, opts) {
   const now = (opts && opts.now) || Date.now();
   const activeTabId = (opts && opts.activeTabId) || null;
   const protectedUrls = (opts && opts.protectedUrls) || []; // forms mid-edit, calls
+  const minTabs = (opts && opts.minTabsBeforeDiscard) ?? DEFAULTS.minTabsBeforeDiscard;
+  const audioGraceMs = (opts && opts.audioGraceMs) ?? DEFAULTS.audioGraceMs;
   const actions = [];
   const live = tabs.filter(t => t && !t.discarded);
   if (pressure.level < 2 || live.length === 0) {
     return { actions, projectedReclaimMB: 0, reason: 'no-discard' };
   }
 
+  // Not enough tabs open: a handful of live tabs is the user's current work,
+  // not reclaimable background. No level, no swap, overrides this.
+  if (live.length < minTabs) {
+    return { actions: [], projectedReclaimMB: 0,
+             reason: `too-few-tabs (${live.length}/${minTabs})`,
+             liveTabs: live.length, minTabsBeforeDiscard: minTabs };
+  }
+
   const protectedIds = new Set([activeTabId]);
   const protectedUrlSet = new Set(protectedUrls);
+  const audioGrace = (t) => t.lastAudioAt && (now - t.lastAudioAt) < audioGraceMs;
 
   let candidates = live
     .filter(t => !protectedIds.has(t.id) && !protectedUrlSet.has(t.url))
-    .filter(t => !t.pinned && !t.audible)
+    .filter(t => !t.pinned && !t.audible && !audioGrace(t))
     .sort((a, b) => (a.lastActiveAt - b.lastActiveAt)); // coldest first
 
   const totalRssMB = candidates.reduce((s, t) => s + (t.rssMB || 150), 0);
