@@ -55,6 +55,19 @@ test('live sample: reads real kernel state, returns sane numbers', () => {
   assert.ok(s.raw.vmStat.pageSize >= 4096, 'page size sane');
 });
 
+test('sample(): machine pressure never enters the discard-path level', () => {
+  // A 16 GB machine pushed to L2 by Hermes/OmniRoute/other apps while the
+  // browser itself is calm (3 tabs, ~900 MB). The extension can only discard
+  // browser tabs, so the level it acts on must be the browser's own; the
+  // machine number stays visible only as systemLevel for diagnostics.
+  const live = sample('Brave Browser');
+  assert.ok(typeof live.systemLevel === 'number',
+    'systemLevel must stay exposed for diagnostics');
+  assert.ok(typeof live.level === 'number', 'level stays numeric');
+  assert.strictEqual(live.level, live.browserLevel,
+    'discard-path level must equal the browser-owned level, not the machine one');
+});
+
 run();
 
 // --- regression: the launchd daemon reported 0 swap and stayed "normal" -----
@@ -101,3 +114,4 @@ test('classify(): a null kernel level never crashes classification', () => {
   const r = classify(snap, null);
   assert.strictEqual(r.level, 1);
 });
+

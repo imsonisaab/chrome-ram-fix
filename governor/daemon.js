@@ -71,7 +71,8 @@ if (req.method !== 'GET' || !req.url.startsWith('/pressure')) {
   const s = sample(browserName);
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({
-      level: s.level, freePct: s.freePct, swapMB: s.swapMB,
+      level: s.level, systemLevel: s.systemLevel, systemReason: s.systemReason,
+      freePct: s.freePct, swapMB: s.swapMB,
       reason: s.reason, totalMB: s.totalMB, at: Date.now(),
       // browser-scoped: what the extension actually controls
       browser: browserName || null,

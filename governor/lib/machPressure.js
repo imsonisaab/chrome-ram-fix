@@ -153,12 +153,15 @@ function sample(browserName) {
   const sys = classify({ ...vs, swapMB: sw.usedMB });
   const fp = browserFootprint(browserName || '');
   const br = classifyBrowser(fp, sys);
-  // The extension acts on the WORSE of the two: if the browser is the hog, act
-  // on it; if the whole machine is under attack, act on that.
-  const level = Math.max(sys.level, br.browserLevel);
-  const reason = level === sys.level ? sys.reason : `browser ${br.browserPct}%`;
+  // The extension can only discard BROWSER tabs, so the level it acts on is
+  // the browser's own. A machine hammered by Hermes/OmniRoute/other apps must
+  // NOT drive tab discarding: those tabs are the user's work, not the leak.
+  // Machine pressure stays fully visible in raw + a separate systemLevel field
+  // for diagnostics, but never enters the discard path.
+  const level = br.browserLevel;
+  const reason = level === 0 ? 'browser normal' : `browser ${br.browserPct}%`;
   return {
-    level, freePct: sys.freePct, swapMB: sys.swapMB, reason,
+    level, systemLevel: sys.level, systemReason: sys.reason, freePct: sys.freePct, swapMB: sys.swapMB, reason,
     totalMB: sys.totalMB,
     browserMB: br.browserMB, browserProcs: br.browserProcs, browserPct: br.browserPct,
     browserLevel: br.browserLevel,
