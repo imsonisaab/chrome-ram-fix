@@ -62,4 +62,29 @@ test('GET /health is 200 liveness probe', async () => {
   assert.strictEqual(r.headers['cache-control'], 'no-store');
 });
 
+test('GET /stats exposes extension-liveness truth', async () => {
+  // poll /pressure once so lastPressureAgeMs has a real sample to report
+  const pr = await get('/pressure');
+  assert.strictEqual(pr.status, 200);
+  const r = await get('/stats');
+  assert.strictEqual(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.strictEqual(r.headers['cache-control'], 'no-store');
+  assert.ok(j.uptimeMs >= 0, 'uptime measured');
+  assert.ok(j.pressureHits >= 1, 'counted the /pressure poll we just made');
+  assert.ok(j.healthHits >= 0);
+  assert.ok(j.statsHits >= 1, 'counted this call too');
+  assert.strictEqual(typeof j.lastPressureAt, 'number');
+  assert.ok(j.lastPressureAt > 0, 'a real sample landed');
+  assert.ok(typeof j.lastPressureAgeMs === 'number', 'age present after a poll');
+  assert.ok(j.lastPressureAgeMs >= 0 && j.lastPressureAgeMs < 60000, 'age is fresh');
+  assert.strictEqual(j.port, server.address().port, 'live bound port echoed');
+});
+
+test('unknown path 404 lists /stats in advertised paths', async () => {
+  const r = await get('/definitely-not-a-route');
+  assert.strictEqual(r.status, 404);
+  assert.ok(JSON.parse(r.body).paths.includes('/stats'));
+});
+
 run();

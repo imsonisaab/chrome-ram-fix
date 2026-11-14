@@ -9,6 +9,14 @@ const { sample } = require(path.join(__dirname, 'lib', 'machPressure.js'));
 const PORT = parseInt(process.env.GOVERNOR_PORT || '8795', 10);
 const HOST = '127.0.0.1';
 
+const STARTED_AT = Date.now();
+let pressureHits = 0;
+let healthHits = 0;
+let statsHits = 0;
+let lastPressureAt = 0;
+let lastBrowser = null;
+
+
 const server = http.createServer((req, res) => {
   // CORS for the extension origin (chrome-extension://<id>)
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,9 +34,30 @@ if (req.method === 'GET' && req.url.split('?')[0] === '/health') {
   return;
 }
 
-  if (req.method !== 'GET' || !req.url.startsWith('/pressure')) {
+  // /stats: ask whether the extension is alive, without guessing.
+if (req.method === 'GET' && req.url.split('?')[0] === '/stats') {
+  statsHits++;
+  const now = Date.now();
+  const b = server.address();
+  const livePort = (b && typeof b === 'object') ? b.port : PORT;
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({
+    uptimeMs: now - STARTED_AT,
+    pressureHits: pressureHits,
+    healthHits: healthHits,
+    statsHits: statsHits,
+    lastPressureAt: lastPressureAt,
+    lastPressureAgeMs: lastPressureAt ? (now - lastPressureAt) : null,
+    lastBrowser: lastBrowser,
+    port: livePort,
+    at: now,
+  }));
+  return;
+}
+
+if (req.method !== 'GET' || !req.url.startsWith('/pressure')) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'not found', paths: ['/pressure', '/health'] }));
+    res.end(JSON.stringify({ error: 'not found', paths: ['/pressure', '/health', '/stats'] }));
     return;
   }
   try {
@@ -36,7 +65,10 @@ if (req.method === 'GET' && req.url.split('?')[0] === '/health') {
     // Default: no browser name -> system-wide numbers only (backwards compatible).
     const qs = req.url.split('?')[1] || '';
     const browserName = new URLSearchParams(qs).get('browser') || '';
-    const s = sample(browserName);
+    pressureHits++;
+  lastPressureAt = Date.now();
+  lastBrowser = browserName || null;
+  const s = sample(browserName);
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({
       level: s.level, freePct: s.freePct, swapMB: s.swapMB,
