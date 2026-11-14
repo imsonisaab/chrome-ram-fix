@@ -52,9 +52,14 @@ test('unknown path -> 404 with allowed paths', async () => {
   assert.ok(JSON.parse(r.body).paths.includes('/pressure'));
 });
 
-test('GET /health -> 404 (only /pressure and 404 advertised)', async () => {
+test('GET /health is 200 liveness probe', async () => {
   const r = await get('/health');
-  assert.strictEqual(r.status, 404);
+  assert.strictEqual(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.strictEqual(j.status, 'ok');
+  assert.strictEqual(j.port, server.address().port, 'health echoes the live bound port');
+  assert.ok(typeof j.at === 'number' && j.at > 0, 'health carries timestamp');
+  assert.strictEqual(r.headers['cache-control'], 'no-store');
 });
 
 run();

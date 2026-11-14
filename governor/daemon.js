@@ -15,6 +15,17 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+// Liveness probe: cheap, no sampling. install/verify/monitors poll this.
+// Echoes the LIVE bound port (not the module default) so callers that bind
+// ephemeral ports in tests still get an honest number.
+if (req.method === 'GET' && req.url.split('?')[0] === '/health') {
+  const bound = server.address();
+  const livePort = (bound && typeof bound === 'object') ? bound.port : PORT;
+  res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ status: 'ok', port: livePort, at: Date.now() }));
+  return;
+}
+
   if (req.method !== 'GET' || !req.url.startsWith('/pressure')) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found', paths: ['/pressure', '/health'] }));
