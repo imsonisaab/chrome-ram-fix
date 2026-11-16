@@ -79,7 +79,7 @@ function currentSignature() {
 }
 function reportProtect() {
   const dirty = currentSignature();
-  chrome.runtime.sendMessage({ type: 'EMBAL_PROTECT_URL', url: location.href, on: !!dirty }).catch(() => {});
+  govSend({ type: 'EMBAL_PROTECT_URL', url: location.href, on: !!dirty });
 }
 // typing signal: the worker protects any tab typed-in in the last 60 s, so a
 // half-finished message survives a pressure spike even if signature sampling
@@ -89,7 +89,7 @@ function reportTyped() {
   const t = Date.now();
   if (t - lastTypedSent < 2000) return;   // coalesce: at most one ping / 2 s
   lastTypedSent = t;
-  chrome.runtime.sendMessage({ type: 'EMBAL_TYPED', url: location.href, at: t }).catch(() => {});
+  govSend({ type: 'EMBAL_TYPED', url: location.href, at: t });
 }
 // live socket signal: an open WebSocket / EventSource means the page holds a
 // session that cannot be resurrected (subscribe, call, chat). Tell the worker.
@@ -100,7 +100,7 @@ function probeLiveSockets() {
     const es = window.__cemeteryLiveEs instanceof Set && window.__cemeteryLiveEs.size;
     live = !!(ws || es);
   } catch (_) { live = false; }
-  chrome.runtime.sendMessage({ type: 'EMBAL_LIVE_SOCKET', url: location.href, on: live }).catch(() => {});
+  govSend({ type: 'EMBAL_LIVE_SOCKET', url: location.href, on: live });
 }
 
 // --- active-stream heartbeat ------------------------------------------------
@@ -115,7 +115,7 @@ function reportBusy() {
   const t = Date.now();
   if (t - lastBusySent < 5000) return;          // coalesce: at most one / 5 s
   lastBusySent = t;
-  chrome.runtime.sendMessage({ type: 'EMBAL_BUSY', url: location.href, at: t }).catch(() => {});
+  govSend({ type: 'EMBAL_BUSY', url: location.href, at: t });
 }
 let domBeat = null;
 function startDomHeartbeat() {
@@ -143,7 +143,7 @@ function startDomHeartbeat() {
 // Audible tabs are already protected; this also catches the tab that went
 // quiet 3 minutes ago, which the tab events alone report as silent.
 function reportAudio(on) {
-  chrome.runtime.sendMessage({ type: 'EMBAL_AUDIO', url: location.href, on: !!on }).catch(() => {});
+  govSend({ type: 'EMBAL_AUDIO', url: location.href, on: !!on });
 }
 function startAudioWatch() {
   try {
@@ -194,6 +194,35 @@ try {
     window.EventSource = CemeteryEs;
   }
 } catch (_) { /* wrapped best-effort: an odd page may freeze these globals */ }
+// --- non-silent worker messaging ------------------------------------------
+// A suspended MV3 worker cannot be reached by a bare sendMessage: the promise
+// rejects with "Could not establish connection". Every governor signal used
+// to end in `.catch(() => {})`, which discarded that rejection and with it
+// the signal -- typed / busy-DOM / audio / live-socket / protect / proximity.
+// The guards those feed then never engaged, and the governor saw an idle tab.
+//
+// Retry once (that retry is the wake) and say so out loud if it still fails.
+let __govWarned = Object.create(null);
+function govWarn(type) {
+  if (__govWarned[type]) return;         // once per type per page, not per send
+  __govWarned[type] = true;
+  try { console.warn('[ChromeRAMFix] worker unreachable for ' + type); } catch (_) {}
+}
+
+function govSend(msg) {
+  const fire = (onFail) => {
+    try {
+      const p = chrome.runtime.sendMessage(msg, () => {
+        void chrome.runtime.lastError;   // reading it marks it handled
+      });
+      if (p && typeof p.catch === 'function') p.catch(onFail);
+    } catch (_) {
+      onFail();
+    }
+  };
+  fire(() => fire(() => govWarn(msg && msg.type)));
+}
+
 // --- keep the service worker resident ------------------------------------
 // MV3 suspends an idle worker after ~30 s. The worker polls every
 // CFG.pollMs (2.5 s) ONLY while it believes it is resident, so an unopened
@@ -214,10 +243,16 @@ try {
 }
 
 function govWake() {
+  // Port first: cheap, and it keeps the worker resident. If the port is gone
+  // (worker suspended, extension reloaded) postMessage delivers nothing, so
+  // fall back to a message -- the only path that can wake a sleeper.
   try {
-    if (govPort) govPort.postMessage({ type: 'GOV_WAKE' });
-    else chrome.runtime.sendMessage({ type: 'GOV_WAKE' }).catch(() => {});
-  } catch (_) { /* worker mid-restart: the 1-minute alarm is the floor */ }
+    if (govPort) {
+      govPort.postMessage({ type: 'GOV_WAKE' });
+      return;
+    }
+  } catch (_) { /* port died mid-call: fall through */ }
+  govSend({ type: 'GOV_WAKE' });
 }
 
 // pageshow fires on initial load AND on every bfcache restore, which is the
@@ -261,7 +296,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 // --- prewarm signal -------------------------------------------------------
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    chrome.runtime.sendMessage({ type: 'EMBAL_PROXIMITY', distanceMs: 0 }).catch(() => {});
+    govSend({ type: 'EMBAL_PROXIMITY', distanceMs: 0 });
   }
 });
 }

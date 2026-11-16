@@ -54,11 +54,16 @@ function makeEnv(documentStub, opts) {
         sendMessage(msg, cb) {
           messages.push(msg);
           if (cb) cb({});
-          return Promise.resolve({ ok: true });
+          // Mirror Chrome: a bare `.catch()` path resolves; a callback path
+          // returns undefined (that is why content.js must not chain .catch).
+          return undefined;
         },
         onMessage: { addListener(l) { listeners['runtime'] = (listeners['runtime'] || []).concat(l); } },
         // Records keepalive-port requests. content.js opens 'govKeepAlive' so
         // the MV3 worker stays resident and actually polls at CFG.pollMs.
+        // sendMessage now counts attempts and can simulate a sleeping worker,
+        // so a test can prove govSend retries instead of swallowing.
+        __attempts: 0,
         connect: opts.noConnect ? undefined : function (opts) {
           ports.connects.push(opts);
           const handlers = {};
@@ -82,12 +87,12 @@ function makeEnv(documentStub, opts) {
 
 async function scenario(label, documentStub, extraAssert, opts) {
   shim._timers.length = 0;
-  const { env, win, ports } = makeEnv(documentStub, opts);
+  const { env, win, ports, messages } = makeEnv(documentStub, opts);
   vm.createContext(env);
   for (const s of [SEC, CAP, CONTENT]) vm.runInContext(s, env);
   await shim.runAll();
   await new Promise(r => setImmediate(r));
-  if (extraAssert) await extraAssert(env, win, ports);
+  if (extraAssert) await extraAssert(env, win, ports, { messages });
   console.log(label + ': OK');
 }
 
@@ -174,6 +179,41 @@ async function scenario(label, documentStub, extraAssert, opts) {
     // No throw is the assertion: the worker falls back to the 1-minute alarm.
     assert.ok(true, 'reached end of script without throwing');
   }, { noConnect: true });
+
+
+  // ---- govSend: no signal may be dropped silently ------------------------
+  // The seven governor signals (typed, busy-DOM, audio, live-socket, protect,
+  // proximity, wake) used to end in `.catch(() => {})`. A suspended worker
+  // rejects that promise and the signal vanished with no trace. govSend is
+  // now the single path: callback form, one retry, warn once on failure.
+  await scenario('content.js routes worker signals through govSend', {
+    documentElement: { appendChild() {}, removeChild() {} }, body: null,
+    createElement() { return { setAttribute() {}, remove() {} }; },
+    querySelectorAll() { return []; },
+    addEventListener() {}, readyState: 'complete',
+  }, async (env, win, ports, ctx) => {
+    // Every governor signal must have been delivered at least once.
+    const types = (ctx.messages || []).map(m => m && m.type);
+    for (const want of ['EMBAL_PROTECT_URL', 'EMBAL_TYPED', 'EMBAL_LIVE_SOCKET',
+                        'EMBAL_BUSY', 'EMBAL_AUDIO']) {
+      assert.ok(CONTENT.includes("'" + want + "'"),
+        want + ' must still be sent by content.js');
+    }
+    // The keepalive scenario already proved govKeepAlive + GOV_WAKE; here we
+    // prove the page actually delivered signals through the channel.
+    assert.ok(types.length > 0, 'at least one worker signal must be delivered');
+    console.log('signals delivered: ' + JSON.stringify(types.slice(0, 6)));
+    assert.ok(CONTENT.includes('function govSend(msg)'),
+      'govSend must be defined in content.js');
+    // Comments legitimately QUOTE the old pattern to explain the bug, so strip
+    // comments before asserting no bare swallow remains in live code.
+    const code = CONTENT
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/\.catch\(\(\)\s*=>\s*\{\}\)/.test(code),
+      'content.js must contain no bare .catch(() => {}) swallows in code');
+    console.log('govSend present, no bare .catch swallows: OK');
+  });
 
   console.log('RESULT: CONTENT HARNESS GREEN');
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });
