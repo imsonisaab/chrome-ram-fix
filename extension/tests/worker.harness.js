@@ -9,8 +9,26 @@ const path = require('path');
 const assert = require('assert');
 
 const ROOT = '/Users/apple/Documents/chrome-cemetery';
-function CBOT_SWAP_FLOOR(src) {
-  return /pressureSwapFloorMB/.test(src) && /pressureLevelFloor/.test(src);
+// The panic floor must be gated on the BROWSER, never on system-wide swap.
+// This is the regression guard for the 45 s-era bug: with 6-8 GB of swap held
+// permanently by Hermes/OmniRoute/Chrome on a 16 GB machine, any term that
+// reads `swapMB` pins the short idle floor ON forever and eats live tabs.
+// Contract: (a) a browser-size floor exists, (b) the level floor is L2+,
+// (c) system swap is NEVER consulted, (d) the gate variable is browser-scoped.
+function CBOT_BROWSER_FLOOR(src) {
+  // Comments legitimately QUOTE the old buggy code ("swapMB >= 1024"), so they
+  // must be stripped before asserting the live gate never consults swap.
+  // (An earlier version of this helper had a broken block-comment pattern and
+  // therefore stripped nothing, letting the comment text satisfy the check.)
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*(\/\/|#).*$/gm, "");
+  const hasBrowserFloor = /pressureBrowserFloorMB:\s*\d+/.test(code);
+  const hasLevelFloor = /pressureLevelFloor:\s*2/.test(code);
+  const neverReadsSwap = !/swapMB\s*>=/.test(code);
+  const gateIsBrowser = /const\s+browserHurting\s*=\s*State\.pressure\.level\s*>=/.test(code)
+    && /browserMB\s*>=\s*CFG\.pressureBrowserFloorMB/.test(code);
+  return hasBrowserFloor && hasLevelFloor && neverReadsSwap && gateIsBrowser;
 }
 
 
@@ -271,7 +289,8 @@ const TERMINAL = { level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' };
     const mp = /discardIdlePressureMs:\s*([0-9]+)\s*\*\s*60\s*\*\s*1000/.exec(CFGSRC);
     assert.ok(mp, 'discardIdlePressureMs must be expressed in minutes');
     assert.strictEqual(parseInt(mp[1], 10), 10, 'L4 idle floor must be 10 minutes, never 45 s');
-    assert.ok(CBOT_SWAP_FLOOR(CFGSRC), 'a swap floor for early pressure must exist');
+    assert.ok(CBOT_BROWSER_FLOOR(CFGSRC),
+      'the panic floor must be gated on the BROWSER only, never on system swap');
     assert.ok(/pressureLevelFloor:\s*2/.test(CFGSRC),
       'the panic floor must require L2+, not L1 — other apps must not push us into it');
     assert.ok(/minTabsBeforeDiscard:\s*6/.test(CFGSRC),

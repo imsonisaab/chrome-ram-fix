@@ -30,7 +30,10 @@ const CFG = {
   // effectively always on. 15 min normal / 10 min at L4.
   discardIdleMs: 15 * 60 * 1000,    // 15 min background idle -> eligible
   discardIdlePressureMs: 10 * 60 * 1000, // L4 panic floor: 10 min, not 45 s
-  pressureSwapFloorMB: 1024,        // only real swap debt counts as pressure
+  // Browser-only pressure gate. 2 GB is where a browser stops being a
+  // well-behaved citizen on a 16 GB machine; below it the browser is not the
+  // problem and no tab of the user's should be touched.
+  pressureBrowserFloorMB: 2048,       // browser >= this MB -> browser is the leak
   pressureLevelFloor: 2,            // L2+ before the shorter floor applies
   bootIdleMs: 30 * 60 * 1000,      // after a SW restart, tabs are presumed idle
   protectAudible: true,            // audio/video playing tabs
@@ -240,14 +243,31 @@ async function tick() {
   await predictWarm();
   await refreshRss();   // real per-tab RSS before any discard decision
 
-  // "Under pressure" = kernel pressure >= L2 OR real swap debt. Other apps'
-  // traffic on a 16 GB machine pushed swap over 500 MB permanently, which used
-  // to pin the panic floor permanently ON. The pressure floor now applies only
-  // at L2+ and only above 1 GB of genuine swap.
+  // "Under pressure" = the BROWSER is under pressure -- nothing else.
+  //
+  // State.pressure.level is already browser-scoped by machPressure.js sample()
+  // (browserPct of total RAM), because the extension can only ever discard
+  // browser tabs. Feeding it a SYSTEM-wide number was the bug that made this
+  // engine dangerous: on a 16 GB machine running Hermes + OmniRoute + Chrome,
+  // the kernel's swap debt sits at 6-8 GB permanently, so the old
+  // `swapMB >= 1024` term pinned the 10-minute panic floor ON forever. Every
+  // background tab therefore qualified 10 minutes after the user last touched
+  // it, even while Brave itself held only 13% of RAM.
+  //
+  // Rule: a tab is only reclaimed when the BROWSER is the thing in trouble.
+  // Another app's memory traffic is that app's problem; the browser's tabs are
+  // the user's work and must not pay for it.
   const now = Date.now();
-  const underPressure = State.pressure.level >= CFG.pressureLevelFloor
-    || State.pressure.swapMB >= CFG.pressureSwapFloorMB;
-  const idleFloor = underPressure ? CFG.discardIdlePressureMs : CFG.discardIdleMs;
+  const browserMB = State.pressure.browserMB || 0;
+  const browserProcs = State.pressure.browserProcs || 0;
+  // A browser is genuinely in trouble when it is either fat in absolute terms
+  // or above the level threshold. Both numbers are the browser's own, measured
+  // by the daemon against this browser's process tree.
+  const browserHurting = State.pressure.level >= CFG.pressureLevelFloor
+    || browserMB >= CFG.pressureBrowserFloorMB;
+  // System swap is reported for diagnosis only. It must NEVER relax or tighten
+  // the browser's idle floor, because the user does not control it.
+  const idleFloor = browserHurting ? CFG.discardIdlePressureMs : CFG.discardIdleMs;
 
   const liveTabCount = [...State.tabs.values()].filter(t => !t.discarded).length;
 
@@ -263,12 +283,23 @@ async function tick() {
       id: t.id, url: t.url, lastActiveAt: t.lastActiveAt,
       lastAudioAt: t.lastAudioAt || 0,
       rssMB: t.rssMB, discarded: t.discarded,
-      pinned: CFG.protectPinned && (t.pinned || typedRecently || t.liveSocket
-                                    || liveUrl || busyDom || audioRecent),
+      // `pinned` means exactly one thing: the user pinned this tab.
+      pinned: CFG.protectPinned && !!t.pinned,
       audible: CFG.protectAudible && t.audible,
+      // Live-session guards are their OWN fields. Folding them into `pinned`
+      // (the old code) meant turning off pin protection also silently
+      // disabled AI/stream/busy-DOM/audio protection -- the four guards that
+      // actually stop a mid-generation tab from being cut. The policy refuses
+      // to discard a tab when any of these is set, independent of each other.
+      liveGuard: !!(typedRecently || t.liveSocket || liveUrl || busyDom || audioRecent),
+      typedRecently: !!typedRecently,
+      liveUrl: !!liveUrl,
+      liveSocket: !!t.liveSocket,
+      busyDom: !!busyDom,
+      audioRecent: !!audioRecent,
       ageMs: age,
       idleMs: idleFloor,
-      protected: typedRecently || liveUrl || busyDom || audioRecent,
+      protected: !!(typedRecently || liveUrl || busyDom || audioRecent),
     };
   });
 

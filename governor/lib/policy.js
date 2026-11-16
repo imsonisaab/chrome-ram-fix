@@ -48,7 +48,12 @@ function decide(pressure, tabs, opts) {
 
   let candidates = live
     .filter(t => !protectedIds.has(t.id) && !protectedUrlSet.has(t.url))
+    // Each guard is independent: a live-stream tab stays alive even when the
+    // user has turned OFF pin protection, and a pinned tab stays alive even
+    // when every live-session signal is clear.
     .filter(t => !t.pinned && !t.audible && !audioGrace(t))
+    .filter(t => !t.liveGuard && !t.liveUrl && !t.liveSocket
+                 && !t.busyDom && !t.audioRecent && !t.typedRecently)
     .sort((a, b) => (a.lastActiveAt - b.lastActiveAt)); // coldest first
 
   const totalRssMB = candidates.reduce((s, t) => s + (t.rssMB || 150), 0);

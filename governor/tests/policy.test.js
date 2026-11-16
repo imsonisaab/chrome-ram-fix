@@ -169,4 +169,50 @@ test('audio grace expires: 15-min-old audio does not protect at L4', () => {
   assert.strictEqual(r.actions.length, 6, 'grace window has passed');
 });
 
+
+  // ---- live-session guards are independent of `pinned` ----------------------
+  // Regression: background.js folded liveUrl / liveSocket / busyDom /
+  // audioRecent into the `pinned` flag, so a user who turned OFF pin
+  // protection also lost every live-session guard -- an AI tab mid-generation
+  // and a streaming tab both became discardable again. Each guard is now its
+  // own field and the policy refuses on ANY of them, whatever `pinned` says.
+  test('liveUrl tab survives L4 even when pinned is false', () => {
+    const six = [1, 2, 3, 4, 5, 6].map(i => tab('t' + i, NOW - 60000 * i, 300));
+    six[2].liveUrl = true;
+    const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, six, { now: NOW });
+    assert.ok(!r.actions.map(a => a.tabId).includes('t3'), 'live-URL tab must survive');
+    assert.strictEqual(r.actions.length, 5, 'the other five go');
+  });
+
+  test('liveGuard alone protects a tab with pinned false and no URL match', () => {
+    const six = [1, 2, 3, 4, 5, 6].map(i => tab('t' + i, NOW - 60000 * i, 300));
+    six[1].pinned = false;
+    six[1].liveGuard = true;
+    const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, six, { now: NOW });
+    assert.ok(!r.actions.map(a => a.tabId).includes('t2'), 'liveGuard must protect');
+  });
+
+  test('busyDom / liveSocket / audioRecent / typedRecently each protect alone', () => {
+    const fields = ['busyDom', 'liveSocket', 'audioRecent', 'typedRecently'];
+    for (const field of fields) {
+      const six = [1, 2, 3, 4, 5, 6].map(i => tab('t' + i, NOW - 60000 * i, 300));
+      six[0][field] = true;
+      six[0].pinned = false;
+      const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, six, { now: NOW });
+      assert.ok(!r.actions.map(a => a.tabId).includes('t1'),
+        field + ' alone must protect, independent of pinned');
+      assert.strictEqual(r.actions.length, 5, field + ' protects exactly one tab');
+    }
+  });
+
+  test('turning off pin protection does not remove live guards', () => {
+    const six = [1, 2, 3, 4, 5, 6].map(i => tab('t' + i, NOW - 60000 * i, 300));
+    six[4].liveUrl = true;
+    six[4].pinned = false;
+    const r = decide({ level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' }, six, { now: NOW });
+    assert.ok(!r.actions.map(a => a.tabId).includes('t5'),
+      'liveUrl still protects when pinned is explicitly false');
+  });
+
+
 run();
