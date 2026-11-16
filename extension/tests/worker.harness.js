@@ -9,26 +9,24 @@ const path = require('path');
 const assert = require('assert');
 
 const ROOT = '/Users/apple/Documents/chrome-cemetery';
-// The panic floor must be gated on the BROWSER, never on system-wide swap.
-// This is the regression guard for the 45 s-era bug: with 6-8 GB of swap held
-// permanently by Hermes/OmniRoute/Chrome on a 16 GB machine, any term that
-// reads `swapMB` pins the short idle floor ON forever and eats live tabs.
-// Contract: (a) a browser-size floor exists, (b) the level floor is L2+,
-// (c) system swap is NEVER consulted, (d) the gate variable is browser-scoped.
+// The idle floor must be a single 15-minute value that pressure cannot change.
+// This is the regression guard for the whole 45s-era saga:
+//   - the original 45 s floor keyed off OTHER apps' swap (6-8 GB permanent
+//     here) and ate tabs the user had just left;
+//   - the "fix" keyed the short floor to the browser's own size instead, but
+//     Brave legitimately holds 2.4-2.6 GB, above the 2048 MB mark, so the
+//     10 min floor was still permanently selected and a 12-minute-old tab was
+//     discardable. One floor, always 15 min, is the only correct contract.
 function CBOT_BROWSER_FLOOR(src) {
-  // Comments legitimately QUOTE the old buggy code ("swapMB >= 1024"), so they
-  // must be stripped before asserting the live gate never consults swap.
-  // (An earlier version of this helper had a broken block-comment pattern and
-  // therefore stripped nothing, letting the comment text satisfy the check.)
   const code = src
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*(\/\/|#).*$/gm, "");
-  const hasBrowserFloor = /pressureBrowserFloorMB:\s*\d+/.test(code);
-  const hasLevelFloor = /pressureLevelFloor:\s*2/.test(code);
-  const neverReadsSwap = !/swapMB\s*>=/.test(code);
-  const gateIsBrowser = /const\s+browserHurting\s*=\s*State\.pressure\.level\s*>=/.test(code)
-    && /browserMB\s*>=\s*CFG\.pressureBrowserFloorMB/.test(code);
-  return hasBrowserFloor && hasLevelFloor && neverReadsSwap && gateIsBrowser;
+  const oneFloor = /discardIdleMs:\s*15\s*\*\s*60\s*\*\s*1000/.test(code);
+  const noSecondFloor = !/discardIdlePressureMs\s*:/.test(code);
+  const noSwapGate = !/swapMB\s*>=/.test(code);
+  const plainRead = /const\s+idleFloor\s*=\s*CFG\.discardIdleMs\s*;/.test(code);
+  const browserLevelOnly = /pressureLevelFloor:\s*2/.test(code);
+  return oneFloor && noSecondFloor && noSwapGate && plainRead && browserLevelOnly;
 }
 
 
@@ -286,9 +284,24 @@ const TERMINAL = { level: 4, freePct: 5, swapMB: 6000, reason: 'terminal' };
     const m = /discardIdleMs:\s*([0-9]+)\s*\*\s*60\s*\*\s*1000/.exec(CFGSRC);
     assert.ok(m, 'discardIdleMs must be expressed in minutes');
     assert.strictEqual(parseInt(m[1], 10), 15, 'default idle floor must be 15 minutes');
-    const mp = /discardIdlePressureMs:\s*([0-9]+)\s*\*\s*60\s*\*\s*1000/.exec(CFGSRC);
-    assert.ok(mp, 'discardIdlePressureMs must be expressed in minutes');
-    assert.strictEqual(parseInt(mp[1], 10), 10, 'L4 idle floor must be 10 minutes, never 45 s');
+    // There is ONE idle floor now. A second, shorter "pressure" floor was the
+    // bug: keyed to system swap it was always on (6-8 GB permanent here), and
+    // re-keyed to the browser's size it still fired, because Brave legitimately
+    // holds 2.4-2.6 GB -- above the 2048 MB mark. Either way a tab the user had
+    // touched 12 minutes ago became discardable.
+    //
+    // Assert the contract directly rather than scraping knob names: the plain
+    // floor must be present at 15 min, the pressure floor must be ABSENT, and
+    // the tick() assignment must be a plain CFG read with no branch.
+    assert.ok(/discardIdleMs:\s*15\s*\*\s*60\s*\*\s*1000/.test(CFGSRC),
+      'discardIdleMs must be 15 minutes');
+    assert.ok(!/discardIdlePressureMs\s*:/.test(CFGSRC),
+      'no second, shorter pressure floor may exist');
+    const floors = CFGSRC.match(/discardIdle\w*\s*:\s*[0-9]+\s*\*\s*60\s*\*\s*1000/g) || [];
+    assert.strictEqual(floors.length, 1,
+      'exactly one minute-denominated idle floor may exist, found ' + floors.length);
+    assert.ok(/const\s+idleFloor\s*=\s*CFG\.discardIdleMs\s*;/.test(CFGSRC),
+      'tick() must read the floor directly from CFG.discardIdleMs with no pressure branch');
     assert.ok(CBOT_BROWSER_FLOOR(CFGSRC),
       'the panic floor must be gated on the BROWSER only, never on system swap');
     assert.ok(/pressureLevelFloor:\s*2/.test(CFGSRC),

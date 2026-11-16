@@ -24,17 +24,23 @@ const CFG = {
   // Idle floors are deliberately LONG. A tab discarded while the user is
   // still reading it (or while a response is streaming into it) costs a
   // reload, a re-typing, a dropped SSE stream — that is a net loss. The former
+  // reload, a re-typing, a dropped SSE stream — that is a net loss. The former
   // 45 s panic floor fired on tabs the user had literally just left, and it
-  // triggered off OTHER apps' memory traffic: on this 16 GB machine swap
-  // from unrelated work sat above 500 MB permanently, so the panic rule was
-  // effectively always on. 15 min normal / 10 min at L4.
-  discardIdleMs: 15 * 60 * 1000,    // 15 min background idle -> eligible
-  discardIdlePressureMs: 10 * 60 * 1000, // L4 panic floor: 10 min, not 45 s
-  // Browser-only pressure gate. 2 GB is where a browser stops being a
-  // well-behaved citizen on a 16 GB machine; below it the browser is not the
-  // problem and no tab of the user's should be touched.
+  // triggered off OTHER apps' memory traffic: on this 16 GB machine swap from
+  // unrelated work sat above 500 MB permanently, so the panic rule was
+  // effectively always on.
+  //
+  // There is ONE floor now, 15 min, and pressure never changes it. Two floors
+  // were the bug: the short (10 min) one was first keyed to system swap (always
+  // true here) and then to the browser's own size, which does not help either —
+  // Brave legitimately holds 2.4-2.6 GB on this machine, above the 2048 MB
+  // mark, so the 10 min floor was still permanently selected and a tab the user
+  // touched 12 minutes ago was discardable.
+  discardIdleMs: 15 * 60 * 1000,    // ONE floor: 15 min background idle
+  // Kept for diagnostics only (/stats, GOV_STATUS). These numbers describe how
+  // loaded the browser is; they never shorten the idle floor.
   pressureBrowserFloorMB: 2048,       // browser >= this MB -> browser is the leak
-  pressureLevelFloor: 2,            // L2+ before the shorter floor applies
+  pressureLevelFloor: 2,              // L2+ browser level
   bootIdleMs: 30 * 60 * 1000,      // after a SW restart, tabs are presumed idle
   protectAudible: true,            // audio/video playing tabs
   protectPinned: true,
@@ -258,16 +264,24 @@ async function tick() {
   // Another app's memory traffic is that app's problem; the browser's tabs are
   // the user's work and must not pay for it.
   const now = Date.now();
-  const browserMB = State.pressure.browserMB || 0;
-  const browserProcs = State.pressure.browserProcs || 0;
-  // A browser is genuinely in trouble when it is either fat in absolute terms
-  // or above the level threshold. Both numbers are the browser's own, measured
-  // by the daemon against this browser's process tree.
-  const browserHurting = State.pressure.level >= CFG.pressureLevelFloor
-    || browserMB >= CFG.pressureBrowserFloorMB;
-  // System swap is reported for diagnosis only. It must NEVER relax or tighten
-  // the browser's idle floor, because the user does not control it.
-  const idleFloor = browserHurting ? CFG.discardIdlePressureMs : CFG.discardIdleMs;
+  // ONE idle floor: 15 minutes. It does not move with pressure.
+  //
+  // Two floors were the bug. The short (10 min) floor used to be selected by
+  // system swap -- 6.5-8 GB permanently on this machine, so it was always on.
+  // It was then re-keyed to the browser's own size, which does not help
+  // either: Brave legitimately holds 2.4-2.6 GB here, i.e. above the 2048 MB
+  // threshold, so the 10 min floor was still permanently active and a tab
+  // touched 12 minutes ago was discardable.
+  //
+  // A shorter floor only pays off in a real emergency, and every real
+  // emergency is already covered by gates that do not depend on timing:
+  //   - fewer than CFG.minTabsBeforeDiscard live tabs -> nothing is discarded
+  //   - the active tab, pinned tabs, audible tabs -> never discarded
+  //   - tabs inside audioGraceMs / busyHeartbeatMs -> never discarded
+  //   - tabs matching protectLiveUrls -> never discarded
+  // What remains is genuinely forgotten background tabs. Waiting 15 minutes
+  // instead of 10 costs nothing; discarding one costs the user a reload.
+  const idleFloor = CFG.discardIdleMs;
 
   const liveTabCount = [...State.tabs.values()].filter(t => !t.discarded).length;
 
