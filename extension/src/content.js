@@ -194,6 +194,39 @@ try {
     window.EventSource = CemeteryEs;
   }
 } catch (_) { /* wrapped best-effort: an odd page may freeze these globals */ }
+// --- keep the service worker resident ------------------------------------
+// MV3 suspends an idle worker after ~30 s. The worker polls every
+// CFG.pollMs (2.5 s) ONLY while it believes it is resident, so an unopened
+// keepalive port means the governor actually samples once a minute on the
+// alarms -- stale pressure data behind every discard decision. Hold the port
+// open for the life of the page; the worker's own 20 s heartbeat rides it.
+//
+// GOV_WAKE is the warm-start path: back/forward-cache restore, tab reopen.
+// The page is about to be read, so the worker should look NOW rather than
+// waiting for its next tick.
+let govPort = null;
+try {
+  govPort = chrome.runtime.connect({ name: 'govKeepAlive' });
+  govPort.onDisconnect.addListener(() => { govPort = null; });
+} catch (_) {
+  // Worker restarting / extension reloading: the alarms still cover us.
+  govPort = null;
+}
+
+function govWake() {
+  try {
+    if (govPort) govPort.postMessage({ type: 'GOV_WAKE' });
+    else chrome.runtime.sendMessage({ type: 'GOV_WAKE' }).catch(() => {});
+  } catch (_) { /* worker mid-restart: the 1-minute alarm is the floor */ }
+}
+
+// pageshow fires on initial load AND on every bfcache restore, which is the
+// exact moment a discarded tab comes back.
+window.addEventListener('pageshow', govWake);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') govWake();
+});
+
 document.addEventListener('input', reportTyped, true);
 document.addEventListener('keydown', reportTyped, true);
 document.addEventListener('compositionstart', reportTyped, true);
