@@ -345,7 +345,23 @@ async function tick() {
     try {
       await captureAndMark(tab);
       await chrome.tabs.discard(a.tabId);
-      tab.discarded = true;
+        tab.discarded = true;
+        // Chrome 157+ assigns a NEW tab id on discard. Find the tab by URL
+        // and re-key the table + snapshot so warm-start can still reload it.
+        try {
+          const after = (await chrome.tabs.query({})).find(t => t.url === tab.url && t.discarded);
+          if (after && after.id !== tab.id) {
+            const bag = await chrome.storage.session.get('snapshots');
+            if (bag.snapshots && bag.snapshots[tab.id]) {
+              bag.snapshots[after.id] = bag.snapshots[tab.id];
+              delete bag.snapshots[tab.id];
+              await chrome.storage.session.set({ snapshots: bag.snapshots });
+            }
+            State.tabs.delete(tab.id);
+            after.discarded = true;
+            State.tabs.set(after.id, Object.assign({}, tab, { id: after.id, discarded: true }));
+          }
+        } catch (_) { /* id refresh best-effort */ }
       State.stats.discarded += 1;
       State.stats.reclaimEstimateMB += tab.rssMB;
     } catch (e) {
@@ -372,8 +388,20 @@ async function prewarmFrom(events) {
   const discarded = [...State.tabs.values()].filter(t => t.discarded)
     .map(t => ({ id: t.id, url: t.url }));
   for (const p of GOVPolicy.prewarm(events, discarded)) {
-    const t = await chrome.tabs.get(p.tabId).catch(() => null);
-    if (t && t.discarded) { await chrome.tabs.reload(p.tabId); State.stats.restored += 1; }
+      // Chrome 157+ may re-key a discarded tab to a new id. Resolve by
+      // stored id first, then by URL so warm-start still finds it.
+      let target = await chrome.tabs.get(p.tabId).catch(() => null);
+      if (!target && p.url) {
+        const all = await chrome.tabs.query({}).catch(() => []);
+        target = all.find(t => t.url === p.url) || null;
+        if (target) {
+          State.tabs.delete(p.tabId);
+          State.tabs.set(target.id, Object.assign({}, State.tabs.get(target.id) || {}, { id: target.id, url: p.url, discarded: true }));
+        }
+      }
+      if (target) {
+        try { await chrome.tabs.reload(target.id); State.stats.restored += 1; } catch (_) {}
+      }
   }
 }
 
