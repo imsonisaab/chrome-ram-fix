@@ -11,6 +11,16 @@ const GovernorPressure = (() => {
   // Any Chromium browser works: the daemon matches the process name it is given.
   function detectBrowserName() {
     try {
+      if (typeof navigator !== 'undefined') {
+        // Modern Brave deliberately strips "Brave" from navigator.userAgent,
+        // so a UA-only test falls through and labels Brave as Chrome. Brave
+        // still exposes navigator.brave and a "Brave" UAData brand — check
+        // those FIRST. Without this, Brave's worker asks the daemon for
+        // Chrome's footprint and makes discard decisions on the wrong numbers.
+        if (navigator.brave && typeof navigator.brave === 'object') return 'Brave Browser';
+        const brands = (navigator.userAgentData && navigator.userAgentData.brands) || [];
+        if (Array.isArray(brands) && brands.some(b => /brave/i.test(String(b && b.brand)))) return 'Brave Browser';
+      }
       const ua = (navigator && navigator.userAgent) || '';
       if (/Edg\//.test(ua)) return 'Microsoft Edge';
       if (/OPR\//.test(ua)) return 'Opera';

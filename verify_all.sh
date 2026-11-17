@@ -59,6 +59,7 @@ run "harness: worker"     "$NODE" extension/tests/worker.harness.js
 run "harness: content"    "$NODE" extension/tests/content.harness.js
 run "harness: popup"      "$NODE" extension/tests/popup.harness.js
 run "harness: embalmer v3" "$NODE" extension/tests/embalmer.harness.js
+run "harness: browser detect" "$NODE" extension/tests/browser-detect.harness.js
 
 # --- live: capture+restore over real CDP ---
 # Hosts the test on STOCK Brave: the RAM Edition extension auto-injects the same
