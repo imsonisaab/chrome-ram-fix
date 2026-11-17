@@ -516,6 +516,18 @@ if (chrome.contextMenus && chrome.contextMenus.onClicked) {
   });
 }
 
+// Clicking the toolbar icon toggles pause/resume. The engine is silent by
+// design (no popup), so a left click on the icon is the only one-click
+// affordance there is — without this handler the icon is a dead button and
+// the user has no way to stop it short of the right-click menu.
+if (chrome.action && chrome.action.onClicked) {
+  chrome.action.onClicked.addListener(() => {
+    State.paused = !State.paused;
+    badgeState();
+    try { chrome.action.setBadgeText({ text: State.paused ? 'II' : '' }); } catch (_) {}
+  });
+}
+
 // Badge on the toolbar icon: "II" while paused, blank while running. No
 // popup, no panel, but the pause state must never be invisible — a user who
 // thinks the engine is still active after pausing it is being lied to.
