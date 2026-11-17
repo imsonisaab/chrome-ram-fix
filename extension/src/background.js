@@ -357,13 +357,13 @@ async function tick() {
 async function captureAndMark(tab) {
   // Snapshot: we ask the tab to dump its own state, then stash by tabId+url.
   try {
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'EMBAL_CAPTURE' });
-    if (res && res.state) {
+    const state = await captureMainWorld(tab.id);
+    if (state) {
       const bag = await chrome.storage.session.get({ snapshots: {} });
-      bag.snapshots[tab.id] = { url: tab.url, at: Date.now(), state: res.state };
+      bag.snapshots[tab.id] = { url: tab.url, at: Date.now(), state: state };
       await chrome.storage.session.set({ snapshots: bag.snapshots });
       // durable copy in the compressed Rust store (survives browser restart)
-      storePut(storeKeyFor(tab.url), { url: tab.url, at: Date.now(), state: res.state });
+      storePut(storeKeyFor(tab.url), { url: tab.url, at: Date.now(), state: state });
     }
   } catch (_) { /* tab mid-navigation: capture skipped, discard still safe */ }
 }
@@ -387,6 +387,28 @@ async function injectLibsMainWorld(tabId){
     await chrome.scripting.executeScript({target:{tabId},files,injectImmediately:true,world:'MAIN'});
     return true;
   }catch(e){ console.warn('[governor] lib inject failed',tabId,e.message); return false; }
+}
+
+// Run capture in the tab's MAIN world, where the Embalmer libs were
+// injected (content.js lives in the ISOLATED world and cannot see them).
+// Returns the captured state object, or null on any failure (safe: a tab
+// mid-navigation just skips its snapshot).
+async function captureMainWorld(tabId){
+  if(!chrome.scripting || !chrome.scripting.executeScript) return null;
+  const ok=await injectLibsMainWorld(tabId);
+  if(!ok) return null;
+  try{
+    const results=await chrome.scripting.executeScript({
+      target:{tabId}, world:'MAIN',
+      func:()=>{
+        const E=(window.__UmdBundle && window.__UmdBundle.Embalmer) || window.Embalmer;
+        if(!E) return null;
+        return JSON.parse(JSON.stringify(new E(window).capture()));
+      }
+    });
+    const r=results && results[0];
+    return (r && !r.error && r.result) ? r.result : null;
+  }catch(e){ return null; }
 }
 
 // ---- message plumbing -----------------------------------------------------
