@@ -531,16 +531,18 @@ if (chrome.action && chrome.action.onClicked) {
 // Badge on the toolbar icon: "II" while paused, blank while running. No
 // popup, no panel, but the pause state must never be invisible — a user who
 // thinks the engine is still active after pausing it is being lied to.
+// The running title keeps the "(click to pause / resume)" hint from the
+// manifest; overwriting it with a bare name hid the only affordance there is.
 function badgeState() {
   if (typeof chrome === 'undefined' || !chrome.action) return;
   try {
     if (State.paused) {
       chrome.action.setBadgeBackgroundColor({ color: '#888888' });
       chrome.action.setBadgeText({ text: 'II' });
-      chrome.action.setTitle({ title: 'ChromeRAMFix — paused' });
+      chrome.action.setTitle({ title: 'ChromeRAMFix paused (click to resume)' });
     } else {
       chrome.action.setBadgeText({ text: '' });
-      chrome.action.setTitle({ title: 'ChromeRAMFix' });
+      chrome.action.setTitle({ title: 'ChromeRAMFix (click to pause)' });
     }
   } catch (_) { /* action API guard: non-critical */ }
 }

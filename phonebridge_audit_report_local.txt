@@ -1,0 +1,517 @@
+================================================================================
+PHONEBRIDGE PR1 - READ-ONLY AUDIT REPORT
+Repo: /Users/apple/Documents/PhoneBridge-PR1 (verify/gui-logic-extraction @ 604b5fa)
+Scope: 16 Core files + AppModel + 7 Views (+ PhoneBridgeApp lifecycle for context)
+Toolchain assumed: Swift 6.4 strict concurrency, macOS 14+ SwiftUI, Xcode 27.2
+No files were modified. No git commands were run.
+================================================================================
+
+SUMMARY OF FINDINGS (by severity)
+---------------------------------
+HIGH (real runtime / correctness defects):
+  H1  KeepAlivePolicy.swift:346-360   endMirrorSession consumes snapshot BEFORE restore is verified -> owner settings lost forever on a failed restore.
+  H2  AppModel.swift:131-147          shutdown() never clears the watchdog phase of the session state machine -> stale "watchdogActive" session blocks all future device selection.
+  H3  PairingSheetView.swift:96-109,122-136  @State (status/error/working/qrSession) and dismiss() are mutated from a background Task, off the main actor -> Swift 6 data race / missed UI updates.
+  H4  SequenceStore.swift:124,130,139,158   in-memory `memory` dict and public `loadFailures` are accessed without the lock on a @unchecked Sendable type -> real data race.
+
+MEDIUM:
+  M1  DeviceScanner.swift:137,151     fresh NWBrowser results are discarded whenever `adb mdns services` fails.
+  M2  ScreenMirrorEngine.swift:249    explicit stop() can NEVER emit .stopped; the event and its handler are dead code.
+  M3  AppModel.swift:219               every frame mutates the @Published `currentSequence.screen`, forcing a full SwiftUI re-publish at ~4 fps.
+  M4  runBusy check-then-set race (AppModel.swift:692-703).
+  M5  PairingService.swift:92         case-sensitive comparison of an mDNS service name against a mixed-case generated name ("PhoneBridge-...") -> QR pairing can always time out if adb lowercases names.
+
+LOW / DESIGN / DEAD STATE:
+  L1  AppModel.swift:62,68            @Published `aiPreviewScreen` and `designPoints` are never read by ANY View - dead published state (cause needless view invalidations).
+  L2  KeepAliveWatchdog.swift:404     `interval` captured at start(); runtime changes to watchdog.interval are ignored.
+  L3  DeviceScanner.swift:100         `pollInterval` captured at start(); runtime changes ignored.
+  L4  SequenceStore.swift:123         `_ = data` is a no-op; comment overstates validation.
+  L5  AppModel.swift:685-690          execute() drops compiled argv[0] and re-prepends the CURRENT adb.path; a plan previewed with path A can run with path B.
+  L6  QRCodeGenerator.swift:55-63     unescapeWiFiQR drops a trailing lone backslash (unreachable from escapeWiFiQR today).
+  L7  Endpoint.swift:29-36            bracketed IPv6 parse accepts a non-IP host inside []; description then drops the brackets.
+  L8  ActionCompiler.swift:318-328    encodeText() silently DROPS control characters while validateText() rejects them - inconsistent public API.
+  L9  HermesStreamParser.swift:49-54,76-80  potential duplicate text (content_block_start text + deltas) and finalResult-over-deltas preference can silently drop text on nonstandard Hermes builds.
+  L10 ContentView.swift:108-111       SettingsView.onAppear overwrites in-progress path drafts from the model each time the pane appears.
+  L11 PairingSheetView.swift:83-87    onDisappear does not reset `working`; a re-presented sheet can inherit a disabled state.
+  L12 SequenceRunnerView.swift:212    MarkerEditor can create a .text("") action; compile() rejects it only at run time.
+  L13 PairingService.swift:47-52      PairingError.isTerminal is a public API nothing calls.
+
+CLEAN FILES (after deep scrutiny): ProcessRunner.swift, ActionCompiler.swift (see L8),
+AIOrchestrator.swift, ModelReplyParser.swift, PNG.swift, SessionLifecycle.swift,
+ContentView.swift (see L10), MirrorView.swift, AICommandBar.swift, SequenceRunnerView.swift
+(see L12), KeepAlivePanel.swift, DeviceListView.swift, Endpoint.swift (see L7),
+QRCodeGenerator.swift (see L6), ADBClient.swift.
+
+================================================================================
+DETAILED PER-FILE FINDINGS
+================================================================================
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/ADBClient.swift
+--------------------------------------------------------------------------------
+VERDICT: essentially clean.
+- L(cosmetic) ADBClient.swift:221 - `text.contains("already connected to")` is fully
+  subsumed by `text.contains("connected to")`; the second disjunct of `positive`
+  is dead. No runtime impact. Fix: delete `|| text.contains("already connected to")`.
+- Everything else traced and correct: argv elements are always separate; serial
+  validation (181-192) rejects metacharacters; `parseDevices` handles "no
+  permissions" (166-176); `connect()` inspects combined stdout/stderr because adb
+  exits 0 on TCP failure (216-226); `screencap` validates the PNG (317-323);
+  `daemonRestartNote` (199-207) correctly distinguishes transport loss from an
+  empty list. `waitForTransport` checks Task.isCancellation (243).
+- Swift 6: `ADBClient` is a final class with 3 immutable lets marked @unchecked
+  Sendable - safe (no mutable state). No @MainActor issue.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/ProcessRunner.swift
+--------------------------------------------------------------------------------
+VERDICT: clean. This is a carefully written continuation bridge.
+- Continuation is resumed exactly once via `resumed` guarded by NSLock in both
+  `finishIfReady` (288-315) and `resumeOnce` (317-332). Cancellation (257-265),
+  timeout (247-255) and SIGKILL escalation (267-286) are mutually ordered.
+- `install` (165-174) handles cancellation-before-install. `beginLaunch`/
+  `didLaunch` (224-238) correctly terminate a process that launched after a
+  cancel/timeout. `drain` never closes a FileHandle from its own readability
+  callback (307-312) - correct.
+- MINOR (no user impact): `recordStdinError` (201-203) appends a message to
+  captured stderr but never marks the command failed; a partial stdin write can
+  still report `succeeded == true`. Fix: set a `stdinFailed` flag and include it
+  in `CommandResult.succeeded`/`succeededWithDeviceSemantics`, or throw from
+  `run()` when the stdin write fails. Low priority - adb stdin is unused by
+  every caller in this app (all pass `stdin: nil`).
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/ScreenMirrorEngine.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 medium defect + 1 negligible inconsistency.
+- [M2] ScreenMirrorEngine.swift:249 - `.stopped` is effectively unreachable.
+  Trace: the background task ends with
+      if let self, await self.finishGeneration(runGeneration) { cont?.yield(.stopped) }
+  `finishGeneration` (265-269) requires `generation == value`. Every path that
+  ends the loop changes `generation` first: `stop()` (271-280) increments it;
+  cancellation leaves the task cancelled but generation is only changed by
+  stop(); deallocation makes `self` nil so the `if let` fails.
+  Consequences: the `FrameEvent.stopped` case (179) and AppModel's handler at
+  AppModel.swift:222-223 ("isMirroring = false") are dead code. Any future
+  consumer that waits for `.stopped` to know the stream ended will hang.
+  FIX: in `stop()`, after `previous?.cancel()` / `await previous.value`, yield
+  `.stopped` directly from the actor (`continuation?.yield(.stopped)`), and drop
+  the generation check at 249 (or keep it only for the self-terminated case).
+- [negligible] ScreenMirrorEngine.swift:285 vs 259 - `captureOnce` uses
+  `sequence += 1` (trapping) while `publish` uses `sequence &+= 1` (wrapping).
+  Mixing them means 2^64 captureOnce calls would crash instead of wrap. Fix:
+  use `&+=` in captureOnce for consistency.
+- Concurrency audit: actor isolation is consistent; `[weak self]` capture in the
+  task plus `await self.publish/isActive/finishGeneration` hops are legal and
+  race-free; generation checks reject buffered old frames after stop/restart;
+  `deinit` (289-292) cancels the task and finishes the continuation. The
+  reentrancy interleaving of two concurrent start()/stop() calls was traced and
+  is safe because stop() awaits `previous.value` before a later start sets a
+  new generation. No @MainActor violation.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/KeepAlivePolicy.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 HIGH defect + 2 low.
+- [H1] KeepAlivePolicy.swift:346-360 (with 296-304) - `endMirrorSession` calls
+  `takeMirrorSnapshot(serial:)` FIRST. `takeMirrorSnapshot` (296-304) sets
+  `mirrorSnapshot = nil` when the serial matches - BEFORE any restore command
+  runs. The three restores (349-359) are `runStep` calls that swallow adb errors
+  into `ok: false` reports. If the device is unreachable, adb is missing, or any
+  restore step fails, the reports say "failed" but the snapshot is already gone;
+  a retry of endMirrorSession finds no snapshot (line 348 returns []) and never
+  restores. The phone is left dimmed with stay_on_while_plugged_in=7 - exactly
+  the state this feature exists to avoid. This also affects
+  AppModel.shutdown/applyADBPath (both call endMirrorSession once).
+  FIX: do not consume the snapshot until all three restores succeed. Add a
+  `peekMirrorSnapshot(serial:)` that reads without clearing; run the restores;
+  only if every step's `ok == true` call a `clearMirrorSnapshot(serial:)`. Keep
+  the snapshot on partial failure so a later endMirrorSession/shutdown can retry.
+- [L2] KeepAliveWatchdog.swift:404 - `let interval = self.interval` captures the
+  value at start(); the task sleeps with that constant (442). Changing
+  `watchdog.interval` while running has no effect. (No UI currently exposes it.)
+  FIX: read `await self.interval` each loop iteration inside the task.
+- [L2b] KeepAliveWatchdog.stop() (449-454) is synchronous and does not await the
+  in-flight task, unlike ScreenMirrorEngine.stop(). A rapid stop()/start() can
+  overlap an in-flight `adb connect`/`policy.apply` from the old generation.
+  The generation guard prevents state corruption but not concurrent subprocesses.
+  FIX: make stop() async, capture the task, cancel it and `await task.value`.
+- Verified correct: updateSettings validation (134-141); the read-back `runStep`
+  semantics (172-207); `isShellWhitelisted` parsing (209-214); the mutually
+  exclusive begin-snapshot placeholder (311-337) with error-path cleanup;
+  parseBatteryLevel (259-267). stateLock is never held across an await.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/ActionCompiler.swift
+--------------------------------------------------------------------------------
+VERDICT: clean (security boundary is sound). One API-consistency note.
+- [L8] ActionCompiler.swift:318-328 - `encodeText` silently skips control
+  characters (`continue` at 323) while the public `validateText` (330-346)
+  rejects the same inputs. A caller using the public `encodeText` directly
+  gets text corruption instead of an error. FIX: make `encodeText` internal,
+  or have it `precondition`/throw on control characters.
+- Deep trace of the two-stage device decode (356-403) is correct: "%%"->"%",
+  "%s"->space, backslash stripping, and the round-trip check that rejects
+  ambiguous "%" payloads. Verified with a real POSIX shell that `\%` is reduced
+  to `%` (the model in `stripShellEscapes` matches observed behavior).
+  Package regex (304-312) rejects whitespace/newlines so `$`-before-newline
+  injection is closed. Coordinate bounds (247-260) are correct (max valid = W-1).
+  NavigationKey allow-list + explicitlyForbidden (5-36, 231-237) is sound.
+- Swift 6: all-static enum, no mutable state; Sendable conformances fine.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/AIOrchestrator.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one low note.
+- [low] AIOrchestrator.swift:217 - `guard result.succeeded` requires
+  `CommandResult.outputComplete`; a stream-json reply whose stdout pipe misses
+  the final EOF is discarded and forces the fallback even if the transcript was
+  complete. Acceptable conservatism; no fix strictly required. If desired, parse
+  the captured stdout before rejecting on outputComplete alone.
+- Verified: screenshot temp dir is created 0700, file 0600, and removed via
+  `defer` even when `createDirectory`/`write` throws (192-209) - no /tmp leak;
+  neither AI rail reads any API key; the HTTP client pins scheme/host/port/path
+  (71-73) and refuses redirects (96-98); finish_reason=="length" fails closed
+  (282); SessionTaskBox (101-113) closes the cancel-before-set race;
+  `compile` fails a plan with zero actions and zero note (320-322).
+- Swift 6: AIOrchestrator/LocalOmniRouteClient/SessionTaskBox are @unchecked
+  Sendable with immutable or NSLock-protected state. `session` is assigned once
+  in init. No real race.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/HermesStreamParser.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one low compatibility note.
+- [L9] HermesStreamParser.swift:49-54 and 76-80 - `content_block_start` appends
+  any non-empty block text, and `content_block_delta` can also append text for
+  the same block on non-Anthropic emitters, doubling text; `finish()` then
+  prefers `finalResult` over the accumulated deltas, so if a "result" event
+  carries a truncated `text` the full delta transcript is discarded. On the
+  required Hermes build the result text is authoritative and complete, so this
+  is defensive only. FIX: track block indices and ignore deltas for a block
+  already emitted in full; prefer the longer of (finalResult, assistantText)
+  only when sawTerminalResult is false.
+- Reasoning events are excluded before session-ID capture (25-27) - correct;
+  role=assistant gating (35, 70) prevents user/message leaks.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/ModelReplyParser.swift
+--------------------------------------------------------------------------------
+VERDICT: clean.
+- Balanced JSON extraction (82-124) correctly respects strings/escapes and
+  skips past matched candidates; wrapper `{"actions":...}`, single action
+  object, and bare array are all handled (21-35); `parseActionsValue` caps at
+  maxActions=12 and counts the overflow as rejected (43-53); `stripFences`
+  preserves non-JSON fences as prose and does not eat backticks inside JSON
+  strings (56-78). My trace of a `swift`-labelled fence confirmed content is
+  preserved, so no fence bug. No crashes on garbage.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/PairingService.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 medium defect + 1 dead API.
+- [M5] PairingService.swift:92 - `services.first(where: { $0.type == ... &&
+  $0.name == session.serviceName })` uses case-sensitive equality on an mDNS
+  instance name. `QRCodeGenerator.randomServiceName()` returns
+  "PhoneBridge-<16 hex>" with uppercase P/B (QRCodeGenerator.swift:65-67).
+  mDNS/DNS-SD names are case-insensitive and some adb builds normalize them to
+  lowercase; if that happens the match never succeeds and `completeQRPairing`
+  always throws `qrDiscoveryTimeout` after burning the full 90 s. FIX: compare
+  case-insensitively:
+    `$0.name.caseInsensitiveCompare(session.serviceName) == .orderedSame`
+- [L13] PairingService.swift:47-52 - `PairingError.isTerminal` is public but
+  unused; the loops instead throw `.unavailable` directly for missing adb
+  (104, 139). Harmless dead API; remove it or use it in the catch blocks.
+- Verified: deadline budgeting with `remaining()` prevents overshooting (84-96,
+  114-147); CancellationError is rethrown (98); connect confirmation matches
+  serial == endpoint.description and state == .device (132-135).
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/QRCodeGenerator.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one negligible note.
+- [L6] QRCodeGenerator.swift:55-63 - `unescapeWiFiQR` drops a trailing lone
+  backslash (`if ch == "\\", let escaped = iterator.next()` consumes nothing and
+  falls to the else only when there is no next char - the backslash is not
+  appended). Not reachable via `escapeWiFiQR`, which never emits a bare trailing
+  backslash. FIX if hardening: `if ch == "\\" { if let e = next { append(e) } else { append("\\") } }`.
+- Payload grammar (31-42) rejects non-printable ASCII; escaping (44-51) covers
+  \ ; , : and "; PNG generation (79-98) uses CIQRCodeGenerator with M correction.
+  Fine.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/DeviceScanner.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 medium defect + 1 low.
+- [M1] DeviceScanner.swift:137 and 151 - in `pollOnce`, line 137 builds fresh
+  `services` from `browsedNames` (NWBrowser results). If `adb mdns services`
+  throws, line 151 replaces them with `services = discovered` (the PREVIOUS
+  poll's snapshot), throwing away the fresh NWBrowser endpoints and leaving the
+  UI showing stale discovery. FIX: on the mdns-failure branch do NOT reassign
+  `services`; keep the `Array(browsedNames.values)` built at 137 and only append
+  the pollError note:
+    } else {
+        pollError = [pollError, "adb mdns services failed; ..."].compactMap{...}
+    }
+- [L3] DeviceScanner.swift:100 - `let interval = self.pollInterval` is captured
+  at start(); changes to pollInterval while running are ignored. FIX: read
+  `await self.pollInterval` inside the loop (or expose a setter that restarts).
+- [low] DeviceScanner.swift:235 - `handleBrowseResults` sets `discovered` to
+  browsedNames only, dropping adb-mdns entries until the next poll (139-149)
+  re-adds them; causes a one-poll flicker. Merge instead of replace.
+- Verified: browser handlers hop onto the actor via `Task { await self... }`
+  (204-211); browsers are cancelled in stop() (113-116) and deinit (241-248);
+  snapshots stream is finished in deinit. Actor isolation correct.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/Endpoint.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one negligible note.
+- [L7] Endpoint.swift:29-36 - the `[host]:port` branch does not require the
+  bracketed host to contain ":"; `[example.com]:5555` is accepted as a HostPort
+  with host "example.com", and `description` (44-47) then emits
+  "example.com:5555" (brackets lost, round-trip mismatch). FIX: in the bracket
+  branch, require `host.contains(":")` before calling `self.init(host:port:)`.
+- IPv4 leading-zero rejection (71), hostname label rules (55-61), and inet_pton
+  IPv6 validation (76-79) are correct.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/PNG.swift
+--------------------------------------------------------------------------------
+VERDICT: clean.
+- PNGHeader.parse (14-35) validates signature, IHDR length/type, dimensions,
+  depth/colour compatibility, compression/filter/interlace and IHDR CRC.
+  PNGDocument.validationError (97-133) walks every chunk, verifies each CRC,
+  enforces IHDR position/PLTE ordering/contiguous non-empty IDAT, and requires
+  IEND to be the exact final chunk - correctly rejects truncation/trailing data.
+  `guard compression == 0, filter == 0, interlace == 0 || interlace == 1` at 29
+  parses as compression==0 && filter==0 && (interlace==0 || interlace==1) -
+  correct (guard commas are ANDed). No defects found.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/SessionLifecycle.swift
+--------------------------------------------------------------------------------
+VERDICT: clean. Pure value-type state machine, all transitions traced:
+select() rejects while any session is active (58-64); startMirror (78-91),
+stopMirror captures the serial before clearing phase (106-114), setWatchdog
+validates endpoint ownership via HostPort equality (131-163),
+invalidateForPathChange (170-178), and the sequence admission rules (203-226)
+are self-consistent. Note: startMirror in the .watchdogActive case (84-85)
+reassigns the session serial to the new serial; this is safe only because
+selection is locked while a session is active - a comment would help but no bug.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridgeCore/SequenceStore.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 HIGH concurrency defect + 1 low.
+- [H4] SequenceStore.swift:124, 130, 139, 158 - the class is `@unchecked
+  Sendable` and declares `stateLock` (85), but in the `inMemory` code path the
+  `memory: [UUID: MarkerSequence]` dictionary is read/written with NO lock:
+    save:  memory[copy.id] = copy                    (124)
+    load:  guard let sequence = memory[id]           (130)
+    loadAll: Array(memory.values).sorted...           (139)
+    delete: memory.removeValue(forKey: id)           (158)
+  `loadFailures` is `public private(set)` (89): writes are locked (141, 150)
+  but the synthesized public getter is NOT, so an external reader races with
+  loadAll's mutation. Under Swift 6 strict concurrency this is a genuine data
+  race (undefined behavior) if the store is touched from more than one task;
+  AppModel currently confines it to @MainActor, which masks it, but the type's
+  Sendable contract is false.
+  FIX: wrap every `memory` access with `stateLock.lock()/unlock()`, and expose
+  loadFailures through a locked computed property:
+    public var loadFailures: [(file: String, reason: String)] {
+      stateLock.lock(); defer { stateLock.unlock() }; return storedLoadFailures
+    }
+  (rename the stored property to `storedLoadFailures`).
+- [L4] SequenceStore.swift:122-123 - `_ = data // Validate the exact persisted
+  representation before saving.` The encode at 122 already produced `data`;
+  `_ = data` validates nothing. Remove the line/comment (or actually validate by
+  decoding a round-trip if that was the intent).
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/AppModel.swift
+--------------------------------------------------------------------------------
+VERDICT: 2 HIGH/MEDIUM state/concurrency defects, 4 low/dead-state items.
+- [H2] AppModel.swift:131-147 - `shutdown()` sets `watchdogEnabled = false`
+  (133) and calls `watchdog.stop()` (134) but never updates the session state
+  machine's watchdog phase. If the watchdog was active, `session.stopMirror()`
+  at 137 transitions .mirrorAndWatchdog -> .watchdogActive (SessionLifecycle
+  .swift:110), and nothing transitions it to .idle. After shutdown,
+  `session.hasActiveSession` remains true, so a subsequent `start()` leaves all
+  `select()`/`selectSerial()` calls rejected with "Stop the mirror and watchdog
+  before changing devices." (285-299) even though both are stopped.
+  FIX: in shutdown(), call
+    _ = session.setWatchdog(enabled: false, endpointForSerial: { _ in nil })
+  BEFORE `session.stopMirror()` so the phase goes .mirrorAndWatchdog ->
+  .mirroring -> .idle. (applyADBPath avoids this because it calls
+  invalidateForPathChange() at 172.)
+- [M4] AppModel.swift:692-703 - `runBusy` checks `guard busy == nil` (693)
+  synchronously but assigns `busy = label` only inside the spawned Task (695).
+  Two UI actions invoked in the same main-actor turn both see `busy == nil`,
+  both pass the guard, and both tasks then run, so two "exclusive" busy
+  operations overlap. This is the very bug the SessionLifecycle model was
+  introduced to fix for sequences (see SessionLifecycle.swift:204-206).
+  FIX: set `busy = label; errorMessage = nil` synchronously before creating the
+  Task; keep the "only release the label we own" logic at 701.
+- [M3] AppModel.swift:219 - `self.currentSequence.screen = frame.size` runs on
+  EVERY frame (~4 fps) from the frame observation task. Because `currentSequence`
+  is @Published, this mutates/publishes the whole sequence object on every
+  capture, invalidating SequenceRunnerView/MirrorView and the marker editor even
+  though the screen size never changes. FIX:
+    if self.currentSequence.screen != frame.size { self.currentSequence.screen = frame.size }
+- [L1] Dead @Published state: `aiPreviewScreen` (line 62) is written at 660/177
+  and read only internally at 669 (executeAIPlan) - NO View reads it.
+  `designPoints` (line 68) is written at 610/619/628/640/641 and read only
+  internally at 609/618 - NO View reads it (Views read `designSelection`, which
+  already carries the points). Both should be plain stored vars like
+  `aiPlanSerial`/`aiPlanADBPath`, otherwise every write fires an unnecessary
+  objectWillChange and re-renders subscribers.
+- [L5] AppModel.swift:685-690 - `execute(_:)` calls
+  `adb.raw(Array(compiled.argv.dropFirst()))`, discarding the compiled argv[0]
+  and re-prepending the CURRENT `adb.path`. A CompiledAction whose argv was
+  built with a different adbPath (possible via the public ActionCompiler API)
+  would execute with a different binary than the one shown in the preview.
+  FIX: expose `ADBClient.runRawArgv(_:)` or assert
+  `compiled.argv.first == adb.path` and throw on mismatch.
+- [low] AppModel.swift:303-313 - `disconnectSelected()` uses
+  `invalidateForPathChange().selectedSerial` merely to clear the selection; this
+  also resets phase and sequenceRunning. It works but conflates two concepts;
+  prefer a dedicated `clearSelection()` on SessionLifecycle.
+- Verified correct: observe() tasks cancel cleanly and use `await MainActor.run`
+  with `[weak self]` (186-249); session.stopMirror captures the serial before
+  the mirror stops (346-357); watchdog reconnect endpoint is validated to belong
+  to the session serial (421-429); per-step sequence re-validation
+  (544-550); runBusy's "release only your own label" (701).
+- Swift 6: AppModel is @MainActor throughout; `Task { @MainActor ... }` usage is
+  consistent. No Sendable violation.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/PhoneBridgeApp.swift (context, not in audit list)
+--------------------------------------------------------------------------------
+- applicationShouldTerminate (7-15) correctly returns .terminateLater and calls
+  reply after `await model.shutdown()`; the `weak var model` is captured strongly
+  by the Task. Risk: if shutdown() hangs, termination hangs - no watchdog timer.
+- `.task { model.start() }` in ContentView:55 has no cancellation handler, but
+  start() is idempotent (`guard !started`) and teardown is handled by the
+  AppDelegate, so no .task-cancellation defect. No onDisappear that kills state
+  in any audited View except PairingSheetView (see H3/L11).
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/ContentView.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one low note.
+- [L10] ContentView.swift:108-111 - SettingsView.onAppear unconditionally
+  resets `adbPathDraft`/`hermesPathDraft` from the model. If the user begins
+  editing a draft and the Settings pane re-appears, typed text is lost. Minor.
+- Banners (10-18) read startupError/errorMessage/pollError; toolbar reads
+  busy/statusMessage/selectedDevice; `.task { model.start() }` at 55. All
+  @Published reads are legitimate. No lifecycle defect.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/MirrorView.swift
+--------------------------------------------------------------------------------
+VERDICT: clean.
+- All @Published reads (isMirroring, mirrorFPS, placingPin, designToolEnabled,
+  mirrorFrame, designMessage, designSelection, designDraftRect, mirrorError,
+  currentSequence.markers, selectedMarkerID) are legitimate.
+- Minor: at line 33 an NSImage decode failure silently shows the "Start mirroring"
+  placeholder even while mirroring is active; and the tap+drag gesture pair
+  (54-83) relies on SwiftUI's standard "drag wins over tap" arbitration. Neither
+  is a defect. No onDisappear/.task misuse.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/AICommandBar.swift
+--------------------------------------------------------------------------------
+VERDICT: clean. Reads aiInstruction/aiPlan/busy/selectedSerial; confirmation
+  dialog (68-73) re-reads aiPlan at presentation time. No defects.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/SequenceRunnerView.swift
+--------------------------------------------------------------------------------
+VERDICT: clean with one low note.
+- [L12] MarkerEditor.rebuildPlainAction (207-218) can build `.text(text)` with
+  an empty string (e.g., switching a marker to "text" at line 143), which
+  ActionCompiler.compile later rejects with .emptyText only at run time. Better
+  to disable Run or validate inline.
+- Binding(for:) (70-75), syncFromAction on appear/id-change (181-182), and
+  per-marker @State are consistent. Reads sequences/currentSequence/
+  sequenceProgress/selectedMarkerID/busy legitimately.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/KeepAlivePanel.swift
+--------------------------------------------------------------------------------
+VERDICT: clean. Reads keepAliveSettings/watchdogEnabled/watchdogStatus/health/
+  keepAliveReport/mirrorSessionReports. StepReportRow expands argv/stdout/stderr
+  safely. No defects.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/PairingSheetView.swift
+--------------------------------------------------------------------------------
+VERDICT: 1 HIGH concurrency defect + 1 low.
+- [H3] PairingSheetView.swift:96-109 and 122-136 - `pairWithCode()` and
+  `startQR()` are nonisolated View methods; the `Task { }` they create inherits
+  a non-main-actor context and mutates the view's @State properties
+  (`status` 99/125, `error` 106/132, `working` 103/107/117/129/133,
+  `qrSession` 120/134) and calls `dismiss()` (104/130) from that background
+  context. Under Swift 6 strict concurrency this is a data race against the
+  main-thread SwiftUI state, with symptoms ranging from missed UI updates to
+  crashes; it also is exactly the class of bug the rest of the app avoids with
+  `await MainActor.run`.
+  FIX: mark both helpers `@MainActor private func ...`, or wrap the Task bodies'
+  UI mutations in `await MainActor.run { ... }` while keeping only the awaited
+  `model.pairing.*` / `model.refreshDevices()` calls outside. (Annotating the
+  methods @MainActor makes the `Task { }` inherit main-actor isolation.)
+- [L11] PairingSheetView.swift:83-87 - onDisappear cancels the task and clears
+  `code`/`qrSession` but not `working`; if the sheet is re-presented without a
+  fresh instance, buttons stay disabled. Add `working = false` in onDisappear.
+- Verified: cancellation is observable by the pairing loops via
+  Task.checkCancellation/ProcessRunner cancellation, so cancel-on-disappear works.
+
+--------------------------------------------------------------------------------
+FILE: Sources/PhoneBridge/Views/DeviceListView.swift
+--------------------------------------------------------------------------------
+VERDICT: clean. Reads manualEntry/busy/selectedDevice/devices/discovered/
+  manualEndpoints; List selection binding calls model.select() (32-37); the
+  pairing sheet is presented with .environmentObject (80-83). No defects.
+
+================================================================================
+@PUBLISHED COVERAGE SUMMARY (AppModel.swift:22-71)
+================================================================================
+Every @Published property is read by at least one View EXCEPT:
+  * aiPreviewScreen (line 62)  - read only internally at AppModel.swift:669.  [L1]
+  * designPoints    (line 68)  - read only internally at AppModel.swift:609,618. [L1]
+These are "dead published state": they drive objectWillChange but no View
+observes them. Downgrade to plain `private var` (like aiPlanSerial at 88-89).
+All others (adbPath, hermesPath, devices, discovered, manualEndpoints,
+manualEntry, startupError, errorMessage, statusMessage, busy, pollError,
+mirrorFrame, mirrorError, isMirroring, mirrorInterval, mirrorFPS, placingPin,
+keepAliveSettings, keepAliveReport, health, watchdogEnabled, watchdogStatus,
+mirrorSessionReports, sequences, currentSequence, selectedMarkerID,
+sequenceProgress, aiInstruction, aiPlan, designToolEnabled, designSelection,
+designDraftRect, designMessage, appearance) have at least one View read site.
+
+================================================================================
+SWIFT 6.4 STRICT-CONCURRENCY / @MAINACTOR VERDICT
+================================================================================
+Real Sendable/race bugs: H3 (PairingSheetView @State off-main), H4
+(SequenceStore unlocked memory/loadFailures). Latent: M4 (runBusy check-then-set),
+L3/L2 (captured interval/interval). All @unchecked Sendable classes other than
+SequenceStore were verified to have immutable or NSLock-protected state.
+No incorrect @MainActor violation found in AppModel (fully @MainActor) or in
+the screen-mirror/watchdog/scanner actors (all cross-actor calls use await).
+
+================================================================================
+macOS 14+ SWIFTUI LIFECYCLE VERDICT
+================================================================================
+- No audited View has an onDisappear that destroys model state; the only
+  onDisappear (PairingSheetView:83-87) correctly cancels its Task.
+- ContentView.task { model.start() } has no cancellation cleanup, but start()
+  is idempotent and AppDelegate.applicationShouldTerminate drives shutdown().
+- No scene/window misuse: WindowGroup + Settings scene, windowResizability,
+  preferredColorScheme all bound to @Published appearance correctly.
+- The only lifecycle issue is H2 (shutdown leaves a stale watchdog session in
+  the state machine) and the dead .stopped event (M2).
+
+================================================================================
+END OF REPORT
+================================================================================
