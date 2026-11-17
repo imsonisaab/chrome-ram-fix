@@ -23,22 +23,28 @@
   // hydrate.js is synchronous and page-speed critical: inject it via a real
   // script tag appended at document_start so it runs before the page's own
   // scripts execute their first layout.
-  for (const s of srcs) {
-    try {
-      await new Promise((res) => {
-        const el = document.createElement('script');
-        el.src = chrome.runtime.getURL(s);
-        el.onload = () => el.remove();
-        document.documentElement.appendChild(el);
-        setTimeout(res, 60);
-      });
-    } catch (e) {
-      // A locked-down page (CSP forbidding script tags, no createElement) must
-      // not kill the content script: keep going without the lib injection; the
-      // worker's chrome.tabs.sendMessage path still works.
-      console.warn('embaler inject failed for', s, e && e.message);
+for (const s of srcs){
+  try {
+    const url = chrome.runtime.getURL(s);
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error('fetch ' + resp.status + ' for ' + s);
+    const code = await resp.text();
+    // Execute in the PAGE main world. An external <script src=chrome-extension://...>
+    // tag is silently dropped by some page CSPs / at document_start timing,
+    // leaving window.Embalmer undefined and capture() permanently failing.
+    // window.eval of our own bundled, version-tagged lib is reliable.
+    if (typeof window !== 'undefined' && window.eval) {
+      window.eval(code + '\n//# sourceURL=' + url);
+    } else {
+      const el = document.createElement('script');
+      el.textContent = code;
+      (document.documentElement || document.head || document.body).appendChild(el);
+      el.remove();
     }
+  } catch (e) {
+    console.warn('embaler inject failed for', s, e.message);
   }
+ }
 
   // The wake bridge: hydrate.js calls (url) => snapshot. It asks the extension
   // background, which reads the Rust store through the native host. If the
