@@ -377,8 +377,26 @@ async function prewarmFrom(events) {
   }
 }
 
+// Inject Embaler libs into a tab's MAIN world. External <script src>
+// and window.eval are both blocked by page CSP; chrome.scripting with
+// world:'MAIN' is the only path that reliably reaches the page context.
+async function injectLibsMainWorld(tabId){
+  if(!chrome.scripting || !chrome.scripting.executeScript) return false;
+  const files=['embaler/lib/security.js','embaler/lib/capture.js','embaler/lib/restoreTiming.js','embaler/lib/hydrate.js'];
+  try{
+    await chrome.scripting.executeScript({target:{tabId},files,injectImmediately:true,world:'MAIN'});
+    return true;
+  }catch(e){ console.warn('[governor] lib inject failed',tabId,e.message); return false; }
+}
+
 // ---- message plumbing -----------------------------------------------------
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg.type === 'EMBAL_INJECT_LIBS') {
+    const tabId = sender.tab && sender.tab.id;
+    injectLibsMainWorld(tabId).then((ok) => reply({ ok: !!ok })).catch(() => reply({ ok: false }));
+    return true;
+  }
+
   if (msg.type === 'EMBAL_PROTECT_URL') {
     if (msg.on) State.protectedUrls.add(msg.url); else State.protectedUrls.delete(msg.url);
     reply({ ok: true });

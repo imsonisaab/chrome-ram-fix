@@ -23,28 +23,18 @@
   // hydrate.js is synchronous and page-speed critical: inject it via a real
   // script tag appended at document_start so it runs before the page's own
   // scripts execute their first layout.
-for (const s of srcs){
-  try {
-    const url = chrome.runtime.getURL(s);
-    const resp = await fetch(url, { cache: 'no-store' });
-    if (!resp.ok) throw new Error('fetch ' + resp.status + ' for ' + s);
-    const code = await resp.text();
-    // Execute in the PAGE main world. An external <script src=chrome-extension://...>
-    // tag is silently dropped by some page CSPs / at document_start timing,
-    // leaving window.Embalmer undefined and capture() permanently failing.
-    // window.eval of our own bundled, version-tagged lib is reliable.
-    if (typeof window !== 'undefined' && window.eval) {
-      window.eval(code + '\n//# sourceURL=' + url);
-    } else {
-      const el = document.createElement('script');
-      el.textContent = code;
-      (document.documentElement || document.head || document.body).appendChild(el);
-      el.remove();
-    }
-  } catch (e) {
-    console.warn('embaler inject failed for', s, e.message);
-  }
- }
+// Inject Embaler libs into the PAGE main world. External script tags and
+// window.eval are both blocked by page CSP on many sites. chrome.scripting
+// with world:"MAIN" (permission added in manifest) is the reliable path.
+// Ask the background worker to do it — content scripts share the tab id.
+try {
+  chrome.runtime.sendMessage({ type: 'EMBAL_INJECT_LIBS' }, () => {
+    void chrome.runtime.lastError;
+  });
+} catch (_) {}
+// Give the injection a tick to land before the wake bridge is installed;
+// capture() degrades gracefully if the libs never arrive.
+await new Promise((res) => setTimeout(res, 120));
 
   // The wake bridge: hydrate.js calls (url) => snapshot. It asks the extension
   // background, which reads the Rust store through the native host. If the
