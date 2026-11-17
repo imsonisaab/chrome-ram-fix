@@ -44,6 +44,17 @@ function makeChrome(tabs, opts) {
   opts = opts || {};
   const calls = [];
   const captured = [];
+// chrome.scripting stub: main-world capture path used by captureMainWorld().
+// Mirrors the EMBAL_CAPTURE message path so the cap-before-discard gate
+// still verifies the real ordering contract.
+const __scriptingExecute = async (params) => {
+  const tabId = params && params.target && params.target.tabId;
+  if (params && typeof params.func === "function") {
+    captured.push(tabId);
+    return [{ result: { url: "http://stub/", state: { title: "stub" } } }];
+  }
+  return [{ result: undefined }]; // file injection (libs)
+};
   const listeners = {};
 
   function on(key, listener) {
@@ -52,6 +63,7 @@ function makeChrome(tabs, opts) {
   }
 
   const chrome = {
+  scripting: { executeScript: __scriptingExecute },
     tabs: {
       async query(q) {
         // The worker's upsertTab keeps `lastActiveAt` from the previous
